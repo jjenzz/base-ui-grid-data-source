@@ -85,10 +85,13 @@ type GridContextValue<T extends RowData> = {
   columnPositions: ReadonlyMap<string, number> | undefined;
   setViewportSize: (width: number, height: number) => void;
   reportColumnLayout: (layout: ColumnLayout) => void;
-  /** Rows before the virtualised ones (header rows, and any fixed body rows), so their `aria-rowindex` counts them. */
-  rowsBefore: number;
-  /** Every row, including the ones not rendered. */
-  totalRows: number;
+  /**
+   * Rows before the virtualised ones (header rows, and any fixed body rows), so their `aria-rowindex` counts them.
+   * Unknown until `Grid.VirtualRows` counts them on the client, so the server's HTML has no row indexes.
+   */
+  rowsBefore: number | undefined;
+  /** Every row, including the ones not rendered. Unknown until counted, like `rowsBefore`. */
+  totalRows: number | undefined;
   reportRowLayout: (layout: RowLayout) => void;
 };
 
@@ -111,6 +114,9 @@ type ColumnWindowContextValue = {
 
 /** What `Grid.VirtualRows` counts after rendering: how many other rows come before and after the virtualised ones. */
 type RowLayout = { before: number; after: number };
+/** Where a row outside the virtualised ones sits: before or after them, and its place there, counting from 1. */
+type RowPosition = { before: boolean; place: number };
+type SetRowPosition = React.Dispatch<React.SetStateAction<RowPosition | null>>;
 
 /**
  * What `Grid.VirtualHeaderCells` measures after rendering: where the virtualised columns begin, their real widths, and
@@ -228,10 +234,14 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
   const [range, setRange] = React.useState<Range>(() => ({ start: offset, end: offset + rows.length }));
   // Column widths start as `defaultColumnWidth` and are corrected as columns are measured.
   const [columnWidths, setColumnWidths] = React.useState<ReadonlyMap<number, number>>(() => new Map());
+  // The latest widths, which can be ahead of `columnWidths` when columns are measured again before the grid
+  // re-renders. Measuring adds to these, so a measure doesn't lose the one before it.
+  const latestColumnWidths = React.useRef(columnWidths);
   // The columns rendered around the virtualised ones, counted once their header row has rendered.
   const [permaColumns, setPermaColumns] = React.useState<PermaColumns | null>(null);
-  // The rows rendered around the virtualised ones. Until they're counted, just the header row is assumed.
-  const [otherRows, setOtherRows] = React.useState<RowLayout>({ before: 1, after: 0 });
+  // The rows rendered around the virtualised ones, once `Grid.VirtualRows` has counted them on the client. Until then
+  // rows aren't numbered: the server can't count them, and every row it renders is in its HTML anyway.
+  const [otherRows, setOtherRows] = React.useState<RowLayout | null>(null);
   // When the wait is over, this changes, and the effect below checks what's needed with the latest rows and scroll.
   const [scheduledRequest, setScheduledRequest] = React.useState(0);
   // The last range requested, so a request that's still on its way isn't replaced while it covers what's needed.
@@ -321,8 +331,8 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
   // Every row's position, and which of them are rendered.
   const rowState = getWindow({ loadedCount: sorted.length, totalRowCount: virtualRowCount, range });
   const rowCount = rowState.rowCount;
-  const rowsBefore = otherRows.before;
-  const totalRows = otherRows.before + rowCount + otherRows.after;
+  const rowsBefore = otherRows?.before;
+  const totalRows = otherRows ? otherRows.before + rowCount + otherRows.after : undefined;
   // Rows from a previous query (loading) don't count as loaded.
   const loaded = loading ? null : { start: offset, end: offset + sorted.length };
   const showLoading = useSpinDelay(loading);
@@ -414,24 +424,35 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
 
   const reportColumnLayout = useStableCallback(({ virtualStart, widths, before, after }: ColumnLayout) => {
     viewportRef.current.virtualStart = virtualStart;
-    // Only stored when they change, so cells reading the positions don't all re-render on every measure.
+    // Only stored when they change, so cells reading the positions don't all re-render on every measure. Compared with
+    // the latest state, not this render's, so a measure before the grid re-renders isn't dropped.
     const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((n, i) => n === b[i]);
-    if (!permaColumns || !same(permaColumns.before, before) || !same(permaColumns.after, after)) {
-      setPermaColumns({ before, after });
-    }
+    setPermaColumns((current) =>
+      current && same(current.before, before) && same(current.after, after) ? current : { before, after },
+    );
+    const latest = latestColumnWidths.current;
     let next: Map<number, number> | null = null;
     for (const [index, width] of widths) {
-      const known = (next ?? columnWidths).get(index) ?? defaultColumnWidth;
+      const known = (next ?? latest).get(index) ?? defaultColumnWidth;
       if (Math.abs(known - width) < 0.5) continue;
-      next ??= new Map(columnWidths);
+      next ??= new Map(latest);
       next.set(index, width);
     }
-    if (next) setColumnWidths(next);
-    updateColumnWindow(next ? getColumnOffsets(virtualColumnCount, defaultColumnWidth, next) : columnOffsets);
+    if (next) {
+      latestColumnWidths.current = next;
+      setColumnWidths(next);
+    }
+    // This render's offsets only while they still match the latest widths.
+    const current = latestColumnWidths.current;
+    updateColumnWindow(
+      current === columnWidths ? columnOffsets : getColumnOffsets(virtualColumnCount, defaultColumnWidth, current),
+    );
   });
 
+  // Compared with the latest state, not this render's: rows can be counted several times before the grid re-renders,
+  // like when strict mode removes and adds them again, and the last count has to win.
   const reportRowLayout = useStableCallback(({ before, after }: RowLayout) => {
-    if (otherRows.before !== before || otherRows.after !== after) setOtherRows({ before, after });
+    setOtherRows((current) => (current?.before === before && current.after === after ? current : { before, after }));
   });
 
   const setScrollPosition = useStableCallback((top: number, left: number) => {
@@ -642,25 +663,33 @@ export function SearchInput({ onChange, ...props }: Omit<React.ComponentProps<'i
  * -----------------------------------------------------------------------------------------------*/
 
 const TableContext = React.createContext<{ id: string } | null>(null);
+/**
+ * The grid's rows other than the virtualised ones, like header rows and an inline row for adding one, so
+ * `Grid.VirtualRows` can count the rows around it without searching the DOM, and tell each one where it sits.
+ */
+const RowRegistryContext = React.createContext<Registry<SetRowPosition> | null>(null);
 
 export function Table({ children, style, ...props }: React.ComponentProps<'div'>) {
   const grid = useGridContext();
   const id = React.useId();
   const table = React.useMemo(() => ({ id }), [id]);
+  const [rows] = React.useState(() => createRegistry<SetRowPosition>());
 
   return (
     <TableContext.Provider value={table}>
-      <div
-        role="grid"
-        data-grid={id}
-        aria-busy={grid.loading}
-        aria-rowcount={grid.totalRows}
-        aria-colcount={grid.columnCount}
-        {...props}
-        style={{ width: 'max-content', minWidth: '100%', ...style }}
-      >
-        {children}
-      </div>
+      <RowRegistryContext.Provider value={rows}>
+        <div
+          role="grid"
+          data-grid={id}
+          aria-busy={grid.loading}
+          aria-rowcount={grid.totalRows}
+          aria-colcount={grid.columnCount}
+          {...props}
+          style={{ width: 'max-content', minWidth: '100%', ...style }}
+        >
+          {children}
+        </div>
+      </RowRegistryContext.Provider>
     </TableContext.Provider>
   );
 }
@@ -769,11 +798,12 @@ function useHeaderRowContext(part: string) {
 
 type HeaderRowProps = Omit<React.ComponentProps<'div'>, 'children'> & { children?: RowChildren };
 
-export function HeaderRow({ children, style, ...props }: HeaderRowProps) {
+export function HeaderRow({ children, style, ref: forwardedRef, ...props }: HeaderRowProps) {
   const [registry] = React.useState(createHeaderCellRegistry);
+  const { ref, ariaRowIndex } = useRowNumber(true, forwardedRef);
   return (
     <HeaderRowContext.Provider value={registry}>
-      <div role="row" aria-rowindex={1} {...props} style={{ display: 'flex', ...style }}>
+      <div role="row" aria-rowindex={ariaRowIndex} {...props} ref={ref} style={{ display: 'flex', ...style }}>
         {typeof children === 'function' ? <VirtualHeaderCells>{children}</VirtualHeaderCells> : children}
       </div>
     </HeaderRowContext.Provider>
@@ -782,35 +812,9 @@ export function HeaderRow({ children, style, ...props }: HeaderRowProps) {
 
 /** A header cell's element, with its name and, for a virtualised one, its column index. */
 type HeaderCellEntry = { name: string; index: number | undefined };
-/**
- * The header cells rendered in a `Grid.HeaderRow`, added and removed by their refs, so `Grid.VirtualHeaderCells` can
- * measure them without searching the DOM. Listeners hear about each cell added or removed.
- */
-type HeaderCellRegistry = {
-  cells: Map<Element, HeaderCellEntry>;
-  add: (element: Element, entry: HeaderCellEntry) => () => void;
-  subscribe: (listener: (element: Element, added: boolean) => void) => () => void;
-};
-
-function createHeaderCellRegistry(): HeaderCellRegistry {
-  const cells = new Map<Element, HeaderCellEntry>();
-  const listeners = new Set<(element: Element, added: boolean) => void>();
-  return {
-    cells,
-    add(element, entry) {
-      cells.set(element, entry);
-      listeners.forEach((listener) => listener(element, true));
-      return () => {
-        cells.delete(element);
-        listeners.forEach((listener) => listener(element, false));
-      };
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-  };
-}
+/** The header cells rendered in a `Grid.HeaderRow`, so `Grid.VirtualHeaderCells` can measure them. */
+type HeaderCellRegistry = Registry<HeaderCellEntry>;
+const createHeaderCellRegistry = () => createRegistry<HeaderCellEntry>();
 
 /* -------------------------------------------------------------------------------------------------
  * GridVirtualHeaderCells
@@ -837,11 +841,11 @@ export function VirtualHeaderCells({ children }: VirtualColumnsProps) {
     const observer = new ResizeObserver((entries) => {
       const widths = new Map<number, number>();
       for (const entry of entries) {
-        const index = registry.cells.get(entry.target)?.index;
+        const index = registry.entries.get(entry.target)?.index;
         if (index !== undefined) widths.set(index, entry.borderBoxSize[0].inlineSize);
       }
       // The other header cells, by name and in the row's order: the ones before the virtualised cells, then after.
-      const others = [...registry.cells]
+      const others = [...registry.entries]
         .filter(([, cell]) => cell.index === undefined)
         .sort(([a], [b]) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
       const before: string[] = [];
@@ -854,7 +858,7 @@ export function VirtualHeaderCells({ children }: VirtualColumnsProps) {
     });
 
     // Cells come and go as the visible columns change, so follow the registry rather than the ones here now.
-    for (const element of registry.cells.keys()) observer.observe(element);
+    for (const element of registry.entries.keys()) observer.observe(element);
     const unsubscribe = registry.subscribe((element, added) => {
       return added ? observer.observe(element) : observer.unobserve(element);
     });
@@ -884,17 +888,8 @@ export function HeaderCell({
   const registry = useHeaderRowContext('Grid.HeaderCell');
   const index = virtual?.index;
   // Adds the cell to its row's registry while it's mounted, so `Grid.VirtualHeaderCells` can measure it.
-  const ref = React.useCallback(
-    (element: HTMLDivElement) => {
-      const remove = registry.add(element, { name, index });
-      const detach = attachRef(forwardedRef, element);
-      return () => {
-        remove();
-        detach();
-      };
-    },
-    [registry, name, index, forwardedRef],
-  );
+  const entry = React.useMemo(() => ({ name, index }), [name, index]);
+  const ref = useRegistryRef(registry, entry, forwardedRef);
   return (
     <HeaderCellContext.Provider value={name}>
       <div
@@ -977,22 +972,35 @@ export function VirtualRows({ children }: VirtualRowsProps) {
   const startRef = React.useRef<HTMLDivElement>(null);
   const endRef = React.useRef<HTMLDivElement>(null);
   const reportRowLayout = React.useEffectEvent(grid.reportRowLayout);
+  const rows = React.useContext(RowRegistryContext);
 
-  // Count the other rows in the grid, header rows included, so the virtualised rows' `aria-rowindex` follows them.
-  // Rows added or removed around the virtualised ones after mounting aren't picked up.
+  // Count the grid's other rows, header rows included, so the virtualised rows' `aria-rowindex` follows them, and tell
+  // each one where it sits for its own. They add themselves to the registry, so the count follows rows added or
+  // removed later too.
   React.useLayoutEffect(() => {
     const start = startRef.current;
     const end = endRef.current;
-    const grid = start?.closest('[role="grid"]');
-    if (!start || !end || !grid) return;
-    let before = 0;
-    let after = 0;
-    for (const row of grid.querySelectorAll('[role="row"]')) {
-      if (start.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_PRECEDING) before++;
-      else if (end.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING) after++;
-    }
-    reportRowLayout({ before, after });
-  }, []);
+    if (!rows || !start || !end) return;
+    const count = () => {
+      const inOrder = [...rows.entries].sort(([a], [b]) =>
+        a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
+      );
+      let before = 0;
+      let after = 0;
+      for (const [row, setPosition] of inOrder) {
+        let next: RowPosition;
+        if (start.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_PRECEDING)
+          next = { before: true, place: ++before };
+        else if (end.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING)
+          next = { before: false, place: ++after };
+        else continue;
+        setPosition((current) => (current?.before === next.before && current.place === next.place ? current : next));
+      }
+      reportRowLayout({ before, after });
+    };
+    count();
+    return rows.subscribe(count);
+  }, [rows]);
 
   return (
     <>
@@ -1040,17 +1048,23 @@ type RowProps = Omit<React.ComponentProps<'div'>, 'children'> & { index?: number
 
 // Parts inside a row read the grid and pass what they need to a memoised part, which only renders when that changes.
 /** A function as children renders only virtualised cells, the same as `Grid.VirtualCells`. */
-export function Row({ index, ...props }: RowProps) {
+export function Row({ index, ref: forwardedRef, ...props }: RowProps) {
   const grid = useGridContext();
   const bodyRow = React.useContext(BodyRowContext);
+  // Rows outside the virtualised ones are counted and numbered by `Grid.VirtualRows`.
+  const { ref, ariaRowIndex: placeIndex } = useRowNumber(bodyRow === null, forwardedRef);
   const rowIndex = index ?? bodyRow?.index;
   // A virtualised row that hasn't loaded. It still renders, so it can hold placeholder cells, or none.
   const loading = bodyRow !== null && bodyRow.itemIndex === undefined;
+  // A row with a position among the virtualised ones follows the rows before them, once they're counted.
+  const ariaRowIndex =
+    rowIndex !== undefined && grid.rowsBefore !== undefined ? grid.rowsBefore + rowIndex + 1 : placeIndex;
   return (
     <MemoRow
       {...props}
+      ref={ref}
       index={rowIndex}
-      ariaRowIndex={rowIndex === undefined ? undefined : grid.rowsBefore + rowIndex + 1}
+      ariaRowIndex={ariaRowIndex}
       selected={grid.isSelected(rowIndex)}
       loadingHeight={loading ? grid.rowHeight : undefined}
     />
@@ -1333,7 +1347,75 @@ const columnStyle = (name: string, width?: number): React.CSSProperties => ({
   minWidth: 0,
 });
 
+/**
+ * Adds a row outside the virtualised ones to the grid's rows, and gives its `aria-rowindex` once `Grid.VirtualRows` has
+ * counted it on the client. Without virtualised rows nothing is counted, and every row is in the DOM, so none needs one.
+ */
+function useRowNumber(registered: boolean, forwardedRef: React.Ref<HTMLDivElement> | undefined) {
+  const grid = useGridContext();
+  const rows = React.useContext(RowRegistryContext);
+  const [position, setPosition] = React.useState<RowPosition | null>(null);
+  const ref = useRegistryRef(registered ? rows : null, setPosition, forwardedRef);
+  let ariaRowIndex: number | undefined;
+  if (position?.before) ariaRowIndex = position.place;
+  else if (position && grid.rowsBefore !== undefined) ariaRowIndex = grid.rowsBefore + grid.rowCount + position.place;
+  return { ref, ariaRowIndex };
+}
+
+/**
+ * A ref that adds its element to `registry` while it's mounted, and sets `forwardedRef` too. Without a registry, it's
+ * just `forwardedRef`. Keep `entry` stable (memoised), or the element is removed and added again on every render.
+ */
+function useRegistryRef<T extends Element, Entry>(
+  registry: Registry<Entry> | null,
+  entry: Entry,
+  forwardedRef: React.Ref<T> | undefined,
+): React.Ref<T> | undefined {
+  const ref = React.useCallback(
+    (element: T) => {
+      const remove = registry?.add(element, entry);
+      const detach = attachRef(forwardedRef, element);
+      return () => {
+        remove?.();
+        detach();
+      };
+    },
+    [registry, entry, forwardedRef],
+  );
+  return registry ? ref : forwardedRef;
+}
+
 /** Gives `element` to a consumer's ref, of either kind, and returns how to take it back. */
+/**
+ * Elements added and removed by their refs while they're mounted, so another part can find them without searching the
+ * DOM. Listeners hear about each one added or removed.
+ */
+type Registry<Entry> = {
+  entries: Map<Element, Entry>;
+  add: (element: Element, entry: Entry) => () => void;
+  subscribe: (listener: (element: Element, added: boolean) => void) => () => void;
+};
+
+function createRegistry<Entry>(): Registry<Entry> {
+  const entries = new Map<Element, Entry>();
+  const listeners = new Set<(element: Element, added: boolean) => void>();
+  return {
+    entries,
+    add(element, entry) {
+      entries.set(element, entry);
+      listeners.forEach((listener) => listener(element, true));
+      return () => {
+        entries.delete(element);
+        listeners.forEach((listener) => listener(element, false));
+      };
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
 function attachRef<T>(ref: React.Ref<T> | undefined, element: T): () => void {
   if (typeof ref === 'function') {
     const cleanup = ref(element);

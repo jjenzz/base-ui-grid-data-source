@@ -424,8 +424,8 @@ test('fixed rows render around VirtualRows, and a function body is the same as V
   const html = grid([totals, h(Grid.VirtualRows, { key: 'rows' }, row)]);
   assert.match(html, /aria-label="Totals"/);
   assert.equal((html.match(/role="row"/g) ?? []).length, 3);
-  // the fixed row has no index of its own, so it's left to its position in the DOM
-  assert.doesNotMatch(html, /aria-label="Totals"[^>]*aria-rowindex/);
+  // rows are only numbered once they're counted on the client, so the server's HTML has no indexes or row count
+  assert.doesNotMatch(html, /aria-rowindex|aria-rowcount/);
   assert.equal(grid([row]), grid([h(Grid.VirtualRows, null, row)]));
 });
 
