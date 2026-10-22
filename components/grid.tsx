@@ -122,8 +122,10 @@ type PermaColumns = { before: readonly string[]; after: readonly string[] };
 const Context = React.createContext<GridContextValue<RowData> | null>(null);
 const RowWindowContext = React.createContext<RowWindowContextValue<RowData> | null>(null);
 const ColumnWindowContext = React.createContext<ColumnWindowContextValue | null>(null);
-// The position of the row `Grid.VirtualRows` is rendering, for the `Grid.Row` the consumer renders inside it.
-const BodyRowIndexContext = React.createContext<number | undefined>(undefined);
+// The row `Grid.VirtualRows` is rendering: its position in the grid, and where it sits in `rows`, or `undefined` while
+// it hasn't loaded. Null outside virtualised rows.
+type BodyRowContextValue = { index: number; itemIndex: number | undefined };
+const BodyRowContext = React.createContext<BodyRowContextValue | null>(null);
 const RowIndexContext = React.createContext<number | undefined>(undefined);
 const HeaderCellContext = React.createContext<string | null>(null);
 
@@ -705,7 +707,7 @@ export function ColumnGroup({ children }: { children?: React.ReactNode }) {
 
 export type ColumnProps = {
   /**
-   * Matches the `name` of a `Grid.HeaderCell` and the `column` of a `Grid.Cell`. Characters other than letters,
+   * Matches the `name` of a `Grid.HeaderCell` and a `Grid.Cell`. Characters other than letters,
    * numbers, `-` and `_` are treated as `_`, so names differing only in those (like `a b` and `a_b`) clash.
    */
   name: string;
@@ -765,9 +767,7 @@ function useHeaderRowContext(part: string) {
   return registry;
 }
 
-type HeaderRowProps = Omit<React.ComponentProps<'div'>, 'children'> & {
-  children?: React.ReactNode | VirtualColumnsProps['children'];
-};
+type HeaderRowProps = Omit<React.ComponentProps<'div'>, 'children'> & { children?: RowChildren };
 
 export function HeaderRow({ children, style, ...props }: HeaderRowProps) {
   const [registry] = React.useState(createHeaderCellRegistry);
@@ -940,11 +940,12 @@ export function SortButton({ onClick, disabled, ...props }: React.ComponentProps
 
 type VirtualRowsProps = {
   /**
-   * Called for each rendered row that has loaded, with where that row sits in the `rows` given to `Grid.Root`, so
-   * `rows[index]` (or `source.at(index)`) is the row, however the grid has sorted or filtered them. The index is only
-   * valid for the `rows` given in this render: look the row up straight away, and keep the row or its `id`, not the index.
+   * Called for each rendered row, with where that row sits in the `rows` given to `Grid.Root`, so `rows[index]` (or
+   * `source.at(index)`) is the row, however the grid has sorted or filtered them. The index is `undefined` for a row
+   * that hasn't loaded: its `Grid.Row` renders as a loading row, with placeholder cells or none. The index is
+   * only valid for the `rows` given in this render: look the row up straight away, and keep the row or its `id`.
    */
-  children: (index: number) => React.ReactNode;
+  children: (index: number | undefined) => React.ReactNode;
 };
 
 /** A function as children renders only virtualised rows, the same as `Grid.VirtualRows`. */
@@ -966,8 +967,8 @@ export function Body({
  * -----------------------------------------------------------------------------------------------*/
 
 /**
- * Rows for every position up to `virtualRowCount`: `{(index) => <Grid.Row … />}` is called for rendered rows that
- * have loaded, with the row's index in `rows`, and the rest are placeholders or spacers. Other rows can sit before or
+ * Rows for every position up to `virtualRowCount`: `{(index) => <Grid.Row … />}` is called for each rendered row, with
+ * the row's index in `rows`, or `undefined` if it hasn't loaded, and the rest are spacers. Other rows can sit before or
  * after it, like an inline row for adding one.
  */
 export function VirtualRows({ children }: VirtualRowsProps) {
@@ -998,17 +999,13 @@ export function VirtualRows({ children }: VirtualRowsProps) {
       <Spacer ref={startRef} height={rowWindow.start * grid.rowHeight} />
       {rowWindow.visible.map((row, i) => {
         const index = rowWindow.start + i;
-        return row ? (
-          <BodyRow key={row.id} item={row.item} index={index} itemIndex={row.itemIndex} render={children} />
-        ) : (
-          <div
-            key={`loading-${index}`}
-            role="row"
-            aria-rowindex={grid.rowsBefore + index + 1}
-            aria-busy="true"
-            aria-label="Loading row"
-            data-placeholder=""
-            style={{ height: grid.rowHeight }}
+        return (
+          <BodyRow
+            key={row ? row.id : `loading-${index}`}
+            item={row?.item}
+            index={index}
+            itemIndex={row?.itemIndex}
+            render={children}
           />
         );
       })}
@@ -1018,14 +1015,21 @@ export function VirtualRows({ children }: VirtualRowsProps) {
 }
 
 /**
- * `index` is the row's position in the grid, for selection and `aria-rowindex`; `itemIndex` is where it sits in `rows`.
- * `item` isn't rendered, but it's compared, so a row whose index now holds a different item renders again.
+ * `index` is the row's position in the grid, for selection and `aria-rowindex`; `itemIndex` is where it sits in `rows`,
+ * and both `item` and `itemIndex` are `undefined` until it loads. `item` isn't rendered, but it's compared, so a row
+ * whose index now holds a different item renders again.
  */
-type BodyRowProps = { item: RowData; index: number; itemIndex: number; render: VirtualRowsProps['children'] };
+type BodyRowProps = {
+  item: RowData | undefined;
+  index: number;
+  itemIndex: number | undefined;
+  render: VirtualRowsProps['children'];
+};
 
 // Memoised, so moving the rendered window only renders the rows that came into view.
 const BodyRow = React.memo(function BodyRow({ index, itemIndex, render }: BodyRowProps) {
-  return <BodyRowIndexContext.Provider value={index}>{render(itemIndex)}</BodyRowIndexContext.Provider>;
+  const row = React.useMemo(() => ({ index, itemIndex }), [index, itemIndex]);
+  return <BodyRowContext.Provider value={row}>{render(itemIndex)}</BodyRowContext.Provider>;
 });
 
 /* -------------------------------------------------------------------------------------------------
@@ -1038,14 +1042,17 @@ type RowProps = Omit<React.ComponentProps<'div'>, 'children'> & { index?: number
 /** A function as children renders only virtualised cells, the same as `Grid.VirtualCells`. */
 export function Row({ index, ...props }: RowProps) {
   const grid = useGridContext();
-  const bodyRowIndex = React.useContext(BodyRowIndexContext);
-  const rowIndex = index ?? bodyRowIndex;
+  const bodyRow = React.useContext(BodyRowContext);
+  const rowIndex = index ?? bodyRow?.index;
+  // A virtualised row that hasn't loaded. It still renders, so it can hold placeholder cells, or none.
+  const loading = bodyRow !== null && bodyRow.itemIndex === undefined;
   return (
     <MemoRow
       {...props}
       index={rowIndex}
       ariaRowIndex={rowIndex === undefined ? undefined : grid.rowsBefore + rowIndex + 1}
       selected={grid.isSelected(rowIndex)}
+      loadingHeight={loading ? grid.rowHeight : undefined}
     />
   );
 }
@@ -1054,10 +1061,12 @@ const MemoRow = React.memo(function Row({
   index,
   ariaRowIndex,
   selected,
+  loadingHeight,
   children,
   style,
   ...props
-}: RowProps & { ariaRowIndex?: number; selected: boolean }) {
+}: RowProps & { ariaRowIndex?: number; selected: boolean; loadingHeight?: number }) {
+  const loading = loadingHeight !== undefined;
   return (
     <RowIndexContext.Provider value={index}>
       <div
@@ -1065,8 +1074,12 @@ const MemoRow = React.memo(function Row({
         aria-rowindex={ariaRowIndex}
         aria-selected={selected}
         data-selected={selected ? '' : undefined}
+        aria-busy={loading || undefined}
+        aria-label={loading ? 'Loading row' : undefined}
+        data-placeholder={loading ? '' : undefined}
         {...props}
-        style={{ display: 'flex', ...style }}
+        // A loading row may have no cells to give it height.
+        style={{ display: 'flex', height: loadingHeight, ...style }}
       >
         {typeof children === 'function' ? <VirtualColumns>{children}</VirtualColumns> : children}
       </div>
@@ -1088,18 +1101,16 @@ export function VirtualCells({ children }: VirtualColumnsProps) {
  * -----------------------------------------------------------------------------------------------*/
 
 /** `column` sets the cell's width and position; its content is whatever the consumer renders, like `row[column]`. */
-type CellProps = React.ComponentProps<'div'> & { column: string };
+type CellProps = React.ComponentProps<'div'> & { name: string };
 
 export function Cell(props: CellProps) {
   const grid = useGridContext();
   const virtual = React.useContext(VirtualColumnContext);
-  return (
-    <MemoCell {...props} columnWidth={virtual?.width} ariaColIndex={getColumnIndex(grid, props.column, virtual)} />
-  );
+  return <MemoCell {...props} columnWidth={virtual?.width} ariaColIndex={getColumnIndex(grid, props.name, virtual)} />;
 }
 
 const MemoCell = React.memo(function Cell({
-  column,
+  name,
   style,
   columnWidth,
   ariaColIndex,
@@ -1108,10 +1119,10 @@ const MemoCell = React.memo(function Cell({
   return (
     <div
       role="gridcell"
-      data-column={column}
+      data-column={name}
       aria-colindex={ariaColIndex}
       {...props}
-      style={{ ...columnStyle(column, columnWidth), ...style }}
+      style={{ ...columnStyle(name, columnWidth), ...style }}
     />
   );
 });
@@ -1123,6 +1134,8 @@ const MemoCell = React.memo(function Cell({
 const VirtualColumnContext = React.createContext<{ index: number; width: number } | null>(null);
 
 type VirtualColumnsProps = { children: (index: number) => React.ReactNode };
+/** A row's cells, or a function that renders its virtualised cells, the same as `Grid.VirtualCells`. */
+type RowChildren = React.ReactNode | VirtualColumnsProps['children'];
 
 /** Renders the visible virtualised columns, with a spacer on each side standing in for the rest. */
 function VirtualColumns(props: VirtualColumnsProps & { spacerRef?: React.Ref<HTMLDivElement> }) {
@@ -1181,12 +1194,15 @@ type CheckboxProps = Omit<React.ComponentProps<'input'>, 'type' | 'checked' | 'd
 export function Checkbox(props: CheckboxProps) {
   const grid = useGridContext();
   const index = React.useContext(RowIndexContext);
+  const bodyRow = React.useContext(BodyRowContext);
+  // A row that hasn't loaded can't be selected: there's nothing to see yet.
+  const rowLoading = bodyRow !== null && bodyRow.itemIndex === undefined;
   return (
     <MemoCheckbox
       {...props}
       index={index}
       checked={grid.isSelected(index)}
-      showLoading={grid.showLoading}
+      showLoading={grid.showLoading || rowLoading}
       selectRow={grid.selectRow}
     />
   );

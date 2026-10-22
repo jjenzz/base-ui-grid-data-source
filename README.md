@@ -73,12 +73,16 @@ own. You build the table from the other parts:
         </Grid.HeaderRow>
       </Grid.Header>
       <Grid.Body>
-        {(index) => (
-          <Grid.Row>
-            <Grid.Cell column="id">{source.at(index)!.id}</Grid.Cell>
-            <Grid.Cell column="name">{source.at(index)!.name}</Grid.Cell>
-          </Grid.Row>
-        )}
+        {(index) =>
+          index === undefined ? (
+            <Grid.Row />
+          ) : (
+            <Grid.Row>
+              <Grid.Cell name="id">{source.at(index)!.id}</Grid.Cell>
+              <Grid.Cell name="name">{source.at(index)!.name}</Grid.Cell>
+            </Grid.Row>
+          )
+        }
       </Grid.Body>
     </Grid.Table>
     <Grid.Empty>No matching products.</Grid.Empty>
@@ -90,6 +94,9 @@ own. You build the table from the other parts:
   - Ordinary children render as they are.
   - A function renders only the rows in view. It's called with the row's index in the `rows` you passed, whatever the
     grid's sort or filter. Look the row up in the same render, and keep the row or its `id`, not the index.
+  - For a row that hasn't loaded, the index is `undefined`, and its `Grid.Row` renders as a loading row
+    (`aria-busy`, `data-placeholder`, `rowHeight` tall, checkboxes disabled). Fill it with placeholder cells, like
+    `<Grid.Cell name="name">{row?.name ?? <Skeleton />}</Grid.Cell>`, or return an empty `<Grid.Row />`.
   - A function given in a Server Component can't reach the client, so wrap it in a Client Component, as
     `components/client-grid.tsx` does.
 - **Rows:** each needs an `id`, either a field or metadata. Rows are a fixed `rowHeight` (44px by default), so match
@@ -106,7 +113,7 @@ own. You build the table from the other parts:
 ### Lazy loading
 
 Pass the rows you have, where they start (`offset`), and the full count (`virtualRowCount`). The grid reserves the
-whole scroll height, shows placeholders for rows that haven't loaded, and calls `onRangeChange({ start, end })` when
+whole scroll height, renders loading rows for rows that haven't loaded, and calls `onRangeChange({ start, end })` when
 it needs more. `rangeSize` and `threshold` control how much it asks for and how early. Set `loading` while a new sort
 or search is on its way, so the old rows aren't treated as current. `/lazy` handles cancelling, caching and retries.
 

@@ -39,7 +39,7 @@ export default function ServerDemo() {
                 {rows.map((item) => (
                   <Grid.Row key={item.id}>
                     {columns.map((column) => (
-                      <Grid.Cell key={column.name} column={column.name}>
+                      <Grid.Cell key={column.name} name={column.name}>
                         {column.name === 'price' || column.name === 'total' ? (
                           <>{currency(rows.get(item, column.name))}</>
                         ) : (

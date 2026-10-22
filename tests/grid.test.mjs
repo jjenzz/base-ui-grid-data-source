@@ -45,7 +45,7 @@ function render(props) {
       { name: item.id },
       React.createElement(
         Grid.Cell,
-        { column: 'select' },
+        { name: 'select' },
         React.createElement(Grid.Checkbox, { 'aria-label': `Select ${item.name}` }),
       ),
     );
@@ -67,6 +67,19 @@ test('controlled search and sort preserve caller processing', () => {
   });
   assert.ok(html.indexOf('Select Second') < html.indexOf('Select First'));
   assert.match(html, /2 rows in this view/);
+});
+
+test('loaded rows, and rows outside virtualised ones, are not marked as loading', () => {
+  const h = React.createElement;
+  const virtual = h(Grid.Body, null, (index) =>
+    h(Grid.Row, null, h(Grid.Cell, { name: 'name' }, index === undefined ? null : rows[index].name)),
+  );
+  const ordinary = h(Grid.Body, null, h(Grid.Row, null, h(Grid.Cell, { name: 'name' }, 'Totals')));
+  for (const body of [virtual, ordinary]) {
+    const html = renderToStaticMarkup(h(Grid.Root, { rows }, h(Grid.Table, null, body)));
+    assert.doesNotMatch(html, /data-placeholder|aria-busy="true"|Loading row/);
+    assert.match(html, /role="gridcell"/);
+  }
 });
 
 test('default rows use internal sorting', () => {
@@ -95,7 +108,7 @@ test('consumers compose their own columns, markup and cell content', () => {
           React.createElement(
             Grid.Row,
             null,
-            React.createElement(Grid.Cell, { column: 'name' }, React.createElement('strong', null, rows[index].name)),
+            React.createElement(Grid.Cell, { name: 'name' }, React.createElement('strong', null, rows[index].name)),
           ),
         ),
       ),
@@ -147,7 +160,7 @@ test('ordinary body children are rendered without virtualization spacers', () =>
             React.createElement(
               Grid.Row,
               { key: item.id, name: item.id },
-              React.createElement(Grid.Cell, { column: 'name' }, item.name),
+              React.createElement(Grid.Cell, { name: 'name' }, item.name),
             ),
           ),
         ),
@@ -307,9 +320,7 @@ function columnGroupMarkup(cols, rootProps = { rows }) {
           null,
           h(Grid.HeaderRow, null, h(Grid.HeaderCell, { name: 'select' }), h(Grid.HeaderCell, { name: 'name' })),
         ),
-        h(Grid.Body, null, () =>
-          h(Grid.Row, null, h(Grid.Cell, { column: 'select' }), h(Grid.Cell, { column: 'name' })),
-        ),
+        h(Grid.Body, null, () => h(Grid.Row, null, h(Grid.Cell, { name: 'select' }), h(Grid.Cell, { name: 'name' }))),
       ),
     ),
   );
@@ -364,7 +375,7 @@ test('virtualised columns render an initial window on the server, with a spacer 
           h(
             Grid.Row,
             null,
-            h(Grid.VirtualCells, null, (i) => h(Grid.Cell, { column: keys[i] })),
+            h(Grid.VirtualCells, null, (i) => h(Grid.Cell, { name: keys[i] })),
           ),
         ),
       ),
@@ -396,7 +407,7 @@ test('rows given a function render only virtualised cells, like VirtualHeaderCel
       ),
     ).replace(/data-grid="[^"]+"/g, '');
   const headerCell = (i) => h(Grid.HeaderCell, { name: keys[i] }, keys[i]);
-  const cell = (i) => h(Grid.Cell, { column: keys[i] });
+  const cell = (i) => h(Grid.Cell, { name: keys[i] });
   const shorthand = grid(headerCell, cell);
   assert.equal(shorthand, grid(h(Grid.VirtualHeaderCells, null, headerCell), h(Grid.VirtualCells, null, cell)));
   assert.equal((shorthand.match(/data-column="c\d+"/g) ?? []).length, 60);
@@ -408,8 +419,8 @@ test('fixed rows render around VirtualRows, and a function body is the same as V
     renderToStaticMarkup(
       h(Grid.Root, { rows, virtualRowCount: 100, rowHeight: 44 }, h(Grid.Table, null, h(Grid.Body, null, ...body))),
     ).replace(/data-grid="[^"]+"/g, '');
-  const row = () => h(Grid.Row, null, h(Grid.Cell, { column: 'name' }));
-  const totals = h(Grid.Row, { key: 'totals', 'aria-label': 'Totals' }, h(Grid.Cell, { column: 'name' }, 'Total'));
+  const row = () => h(Grid.Row, null, h(Grid.Cell, { name: 'name' }));
+  const totals = h(Grid.Row, { key: 'totals', 'aria-label': 'Totals' }, h(Grid.Cell, { name: 'name' }, 'Total'));
   const html = grid([totals, h(Grid.VirtualRows, { key: 'rows' }, row)]);
   assert.match(html, /aria-label="Totals"/);
   assert.equal((html.match(/role="row"/g) ?? []).length, 3);
@@ -433,7 +444,7 @@ test('the render function gets each row’s index in the rows given, however the
         { rows: items, ...props },
         h(Grid.Body, null, (index) => {
           seen.push(index);
-          return h(Grid.Row, null, h(Grid.Cell, { column: 'name' }));
+          return h(Grid.Row, null, h(Grid.Cell, { name: 'name' }));
         }),
       ),
     );
@@ -476,7 +487,7 @@ test('virtualised cells carry no index attribute: header cells are measured thro
           null,
           h(Grid.HeaderRow, null, (i) => h(Grid.HeaderCell, { name: `c${i}` })),
         ),
-        h(Grid.Body, null, () => h(Grid.Row, null, (i) => h(Grid.Cell, { column: `c${i}` }))),
+        h(Grid.Body, null, () => h(Grid.Row, null, (i) => h(Grid.Cell, { name: `c${i}` }))),
       ),
     ),
   );

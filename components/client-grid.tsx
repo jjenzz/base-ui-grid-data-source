@@ -17,15 +17,17 @@ export function GridBody<M extends Metadata>({
   return (
     <Grid.Body>
       {(index) => {
+        // Every row is given up front, so this only guards the type.
+        if (index === undefined) return <Grid.Row />;
         const row = source.at(index)!;
         return (
           <Grid.Row>
-            <Grid.Cell column="select">
+            <Grid.Cell name="select">
               <Grid.Checkbox aria-label={`Select ${row.name}`} />
             </Grid.Cell>
 
             {columns.map((column) => (
-              <Grid.Cell key={column.name} column={column.name}>
+              <Grid.Cell key={column.name} name={column.name}>
                 {/* `source.get` also reads computed metadata, like `total`, which isn't a field of the product. */}
                 {column.name === 'price' || column.name === 'total'
                   ? currency(source.get(row, column.name))

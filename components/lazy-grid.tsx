@@ -126,23 +126,27 @@ export function ConsumerLazyGrid({
 
               <Grid.VirtualRows>
                 {(index) => {
-                  const row = data.items[index];
+                  const row = index !== undefined ? data.items[index] : null;
                   return (
                     <Grid.Row>
-                      <Grid.Cell column="select">
-                        <Grid.Checkbox aria-label={`Select ${row.name}`} />
+                      <Grid.Cell name="select">
+                        <Grid.Checkbox disabled={!row} aria-label={row ? `Select ${row.name}` : ''} />
                       </Grid.Cell>
 
                       {columns.map((column) => (
-                        <Grid.Cell key={column.name} column={column.name}>
-                          {column.name === 'price' || column.name === 'total'
-                            ? currency(row[column.name])
-                            : String(row[column.name])}
+                        <Grid.Cell key={column.name} name={column.name}>
+                          {!row ? (
+                            <Skeleton />
+                          ) : column.name === 'price' || column.name === 'total' ? (
+                            currency(row[column.name])
+                          ) : (
+                            String(row[column.name])
+                          )}
                         </Grid.Cell>
                       ))}
 
                       <Grid.VirtualCells>
-                        {(week) => <Grid.Cell column={`week-${week}`}>{row.sales[week]}</Grid.Cell>}
+                        {(week) => <Grid.Cell name={`week-${week}`}>{row?.sales[week] ?? '-'}</Grid.Cell>}
                       </Grid.VirtualCells>
                     </Grid.Row>
                   );
@@ -182,6 +186,11 @@ export function ConsumerLazyGrid({
   );
 }
 
+/** A grey bar standing in for a cell's value while its row loads. The row already says it's loading, so it's hidden. */
+function Skeleton() {
+  return <span className="skeleton" aria-hidden="true" />;
+}
+
 function AddProductRow({ onAdd }: { onAdd: (product: Omit<Product, 'id'>) => void }) {
   return (
     <form
@@ -201,30 +210,30 @@ function AddProductRow({ onAdd }: { onAdd: (product: Omit<Product, 'id'>) => voi
       }}
     >
       <Grid.Row aria-label="Add a product">
-        <Grid.Cell column="select">
+        <Grid.Cell name="select">
           <button type="submit" aria-label="Add product">
             +
           </button>
         </Grid.Cell>
-        <Grid.Cell column="id">New</Grid.Cell>
-        <Grid.Cell column="name">
+        <Grid.Cell name="id">New</Grid.Cell>
+        <Grid.Cell name="name">
           <input name="name" required placeholder="Product name" aria-label="Product name" />
         </Grid.Cell>
-        <Grid.Cell column="category">
+        <Grid.Cell name="category">
           <select name="category" aria-label="Category">
             {productCategories.map((category) => (
               <option key={category}>{category}</option>
             ))}
           </select>
         </Grid.Cell>
-        <Grid.Cell column="price">
+        <Grid.Cell name="price">
           <input name="price" type="number" min={0} required placeholder="£" aria-label="Price" />
         </Grid.Cell>
-        <Grid.Cell column="quantity">
+        <Grid.Cell name="quantity">
           <input name="quantity" type="number" min={0} required placeholder="0" aria-label="Stock" />
         </Grid.Cell>
-        <Grid.Cell column="total" />
-        <Grid.VirtualCells>{(index) => <Grid.Cell column={`week-${index}`} />}</Grid.VirtualCells>
+        <Grid.Cell name="total" />
+        <Grid.VirtualCells>{(index) => <Grid.Cell name={`week-${index}`} />}</Grid.VirtualCells>
       </Grid.Row>
     </form>
   );
