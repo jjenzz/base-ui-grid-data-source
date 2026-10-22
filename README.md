@@ -77,7 +77,7 @@ own. You build the table from the other parts:
       </Grid.Header>
       <Grid.Body>
         {(index) => {
-          const row = index !== undefined ? data[index] : undefined;
+          const row = index !== undefined ? rows[index] : undefined;
           return (
             <Grid.Row>
               <Grid.Cell name="select">
