@@ -57,7 +57,7 @@ own. You build the table from the other parts:
 ```tsx
 <Grid.Root rows={rows} searchColumns={['name']} defaultSort={{ column: 'id', direction: 'asc' }}>
   <Grid.SearchInput />
-  <Grid.Viewport className="grid-scroll">
+  <Grid.Viewport>
     <Grid.Table aria-label="Products">
       <Grid.ColumnGroup>
         <Grid.Column name="id" width={80} pinned="start" />
