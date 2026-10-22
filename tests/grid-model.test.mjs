@@ -56,6 +56,17 @@ test('rendered rows cover the visible pixels plus a buffer, and only move when t
   assert.deepEqual(getRenderedRange(current, { start: 5, end: 20 }, { start: 3, end: 22 }), { start: 3, end: 22 });
 });
 
+test('a rendered range longer than needed shrinks, even though it covers the visible rows', () => {
+  // Every row, as rendered before the viewport is measured.
+  const everyRow = { start: 0, end: 5000 };
+  const outer = { start: 0, end: 15 };
+  assert.equal(getRenderedRange(everyRow, { start: 0, end: 13 }, outer), everyRow);
+  assert.deepEqual(getRenderedRange(everyRow, { start: 0, end: 13 }, outer, 20), outer);
+  // A range no longer than the limit is still kept.
+  const current = { start: 0, end: 20 };
+  assert.equal(getRenderedRange(current, { start: 0, end: 13 }, outer, 20), current);
+});
+
 test('nothing is requested while threshold rows are loaded beyond the rendered rows', () => {
   const options = { rowCount: 240, rangeSize: 100, threshold: 20, direction: 'down' };
   const loaded = { start: 0, end: 100 };

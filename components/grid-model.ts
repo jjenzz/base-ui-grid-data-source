@@ -7,11 +7,11 @@ export type ScrollDirection = 'up' | 'down';
 export function getWindow({
   loadedCount,
   totalRowCount,
-  window,
+  range: window,
 }: {
   loadedCount: number;
   totalRowCount?: number;
-  window: Range;
+  range: Range;
 }) {
   const rowCount = Math.max(loadedCount, totalRowCount ?? loadedCount);
   const end = Math.min(window.end, rowCount);
@@ -27,9 +27,11 @@ export function getRowRange(rowHeight: number, rowCount: number, from: number, t
 /**
  * Keeps the rendered range while it still covers `inner` (the visible area plus a margin), and otherwise moves to
  * `outer` (the visible area plus the full buffer). So the range only changes now and then, not on every row or column.
+ * A range longer than `maxLength` is replaced too, like the every-row range rendered before the viewport is measured,
+ * which would otherwise always cover what's visible and never shrink.
  */
-export function getRenderedRange(current: Range, inner: Range, outer: Range) {
-  return containsRange(current, inner) ? current : outer;
+export function getRenderedRange(current: Range, inner: Range, outer: Range, maxLength = Infinity) {
+  return containsRange(current, inner) && current.end - current.start <= maxLength ? current : outer;
 }
 
 /**

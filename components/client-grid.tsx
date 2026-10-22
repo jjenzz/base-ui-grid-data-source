@@ -13,7 +13,6 @@ export function GridBody<M extends Metadata>({
   rows: DataSourceInput<Product, M>;
   columns: Columns;
 }) {
-  // The same rows given to `Grid.Root`, so the grid's indexes point into them however it sorts or filters.
   const source = React.useMemo(() => createDataSource(rows), [rows]);
   return (
     <Grid.Body>

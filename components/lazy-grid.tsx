@@ -18,6 +18,8 @@ export function ConsumerLazyGrid({
   totalRowCount: number;
 }) {
   const activeRequestRef = React.useRef<AbortController | null>(null);
+  // Saving isn't connected yet, so the last product submitted is just shown.
+  const [added, setAdded] = React.useState<Omit<Product, 'id'> | null>(null);
   const [view, setView] = React.useState<View>({ search: '', sort: { column: 'id', direction: 'asc' } });
   const [error, setError] = React.useState<{ range: Range; message: string } | null>(null);
   const [data, setData] = React.useState({
@@ -28,9 +30,6 @@ export function ConsumerLazyGrid({
     selected: { all: false, ranges: [] } as Grid.Selected,
   });
 
-  // Saving isn't connected yet, so the last product submitted is just shown.
-  const [added, setAdded] = React.useState<Omit<Product, 'id'> | null>(null);
-
   // Rows and selection still belong to data.view until the new view arrives.
   const loading = data.view !== view;
 
@@ -38,7 +37,7 @@ export function ConsumerLazyGrid({
     const previousQuery = { ...data.view, searchColumns };
     // Ignore selection changes while loading, so snapshot can't go stale mid-request.
     const selection = loading && { previousQuery, selected: data.selected };
-    return getProducts({ ...view, searchColumns, range, ...selection }, signal);
+    return getProducts({ ...view, ...selection, searchColumns, range }, signal);
   }
 
   function handleRangeChange(range: Range) {

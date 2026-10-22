@@ -2,8 +2,7 @@ import { ConsumerLazyGrid } from '@/components/lazy-grid';
 import { getProductsPage } from '@/lib/products-query';
 
 export default function ClientDemo() {
-  // The same code the API uses, so the first rows match what the grid fetches afterwards. Only enough to fill the
-  // viewport: once mounted, the grid measures it and asks for the range it needs.
+  // Only enough to fill the viewport
   const firstPage = getProductsPage({
     start: 0,
     end: 20,
