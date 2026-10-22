@@ -55,7 +55,7 @@ Import the parts with `import * as Grid from '@/components/grid'`. `Grid.Root` h
 own. You build the table from the other parts:
 
 ```tsx
-<Grid.Root rows={source} searchColumns={['name']} defaultSort={{ column: 'id', direction: 'asc' }}>
+<Grid.Root rows={rows} searchColumns={['name']} defaultSort={{ column: 'id', direction: 'asc' }}>
   <Grid.SearchInput />
   <Grid.Viewport className="grid-scroll">
     <Grid.Table aria-label="Products">
@@ -64,6 +64,9 @@ own. You build the table from the other parts:
       </Grid.ColumnGroup>
       <Grid.Header>
         <Grid.HeaderRow>
+          <Grid.HeaderCell name="select">
+            <Grid.SelectAll />
+          </Grid.HeaderCell>
           <Grid.HeaderCell name="id">
             <Grid.SortButton>ID</Grid.SortButton>
           </Grid.HeaderCell>
@@ -73,16 +76,18 @@ own. You build the table from the other parts:
         </Grid.HeaderRow>
       </Grid.Header>
       <Grid.Body>
-        {(index) =>
-          index === undefined ? (
-            <Grid.Row />
-          ) : (
+        {(index) => {
+          const row = index !== undefined ? data[index] : null;
+          return (
             <Grid.Row>
-              <Grid.Cell name="id">{source.at(index)!.id}</Grid.Cell>
-              <Grid.Cell name="name">{source.at(index)!.name}</Grid.Cell>
+              <Grid.Cell name="select">
+                <Grid.Checkbox disabled={!row} aria-label={row ? `Select ${row.name}` : ''} />
+              </Grid.Cell>
+              <Grid.Cell name="id">{row?.id ?? <Skeleton />}</Grid.Cell>
+              <Grid.Cell name="name">{row?.name ?? <Skeleton />}</Grid.Cell>
             </Grid.Row>
-          )
-        }
+          );
+        }}
       </Grid.Body>
     </Grid.Table>
     <Grid.Empty>No matching products.</Grid.Empty>
