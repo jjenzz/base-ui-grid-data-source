@@ -25,7 +25,7 @@ export const products: Product[] = Array.from({ length: 5000 }, (_, index) => ({
   quantity: 1 + ((index * 7) % 50),
 }));
 
-// How many products the lazy grid requests, holds in memory and renders at once.
+// How many products the lazy grid requests and holds in memory at once.
 export const itemsPerPage = 200;
 
 export type Columns = typeof columns;

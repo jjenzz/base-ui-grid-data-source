@@ -25,19 +25,15 @@ export function getRowRange(rowHeight: number, rowCount: number, from: number, t
 }
 
 /**
- * Keeps the rendered range while it still covers `inner` (the visible area plus a margin), and otherwise moves to
- * `outer` (the visible area plus the full buffer). So the range only changes now and then, not on every row or column.
- * A range longer than `maxLength` is replaced too, like the every-row range rendered before the viewport is measured,
- * which would otherwise always cover what's visible and never shrink.
+ * Keeps `current` while it covers `inner` (visible area plus half the buffer), else moves to `outer` (plus the full
+ * buffer), so the range changes now and then, not on every row. Also replaced when longer than `maxLength`, or the
+ * every-row range rendered before measuring would always cover what's visible and never shrink.
  */
 export function getRenderedRange(current: Range, inner: Range, outer: Range, maxLength = Infinity) {
   return containsRange(current, inner) && current.end - current.start <= maxLength ? current : outer;
 }
 
-/**
- * The rows that should be loaded right now: the rendered rows, plus `threshold` rows ahead of them in the scroll
- * direction, so the next rows arrive before they're rendered.
- */
+/** The rows to have loaded: those rendered, plus `threshold` ahead in the scroll direction, so they arrive in time. */
 export function getNeededRange({
   rendered,
   rowCount,
@@ -54,10 +50,7 @@ export function getNeededRange({
     : { start: Math.max(0, rendered.start - threshold), end: Math.min(rowCount, rendered.end) };
 }
 
-/**
- * Where each column starts: `offsets[i]` is the left edge of column `i`, and `offsets[count]` the total width.
- * Columns use their measured width once known, and `defaultWidth` until then.
- */
+/** `offsets[i]` is column `i`'s left edge and `offsets[count]` the total width, from measured or default widths. */
 export function getColumnOffsets(count: number, defaultWidth: number, measured: ReadonlyMap<number, number>) {
   const offsets = new Float64Array(count + 1);
   for (let index = 0; index < count; index++)
@@ -93,9 +86,8 @@ export function containsRange(outer: Range | null, inner: Range) {
 }
 
 /**
- * What to request once the needed rows aren't loaded, or null if they are.
- * The request keeps up to `threshold` rows behind the viewport, so reversing direction doesn't refetch straight away,
- * and puts the rest of the range ahead of it in the scroll direction. `rangeSize` should be well over twice `threshold`.
+ * The range to request when needed rows aren't loaded, or null. It keeps up to `threshold` rows behind, so reversing
+ * doesn't refetch straight away, and the rest ahead. `rangeSize` should be well over twice `threshold`.
  */
 export function getRequestedRange({
   needed,
@@ -122,9 +114,8 @@ export function getRequestedRange({
 }
 
 /**
- * Moves a request's start onto a fixed grid (multiples of a quarter of the range), picking the nearest grid start
- * that still covers `needed`. The same rows are then always requested with the same range, whichever way you
- * scroll, so a cache keyed on the range (like the browser's, keyed on the URL) gets hits.
+ * Snaps a request's start to multiples of a quarter range, nearest first, still covering `needed`. The same rows are
+ * then always requested with the same range, so a cache keyed on it (like the browser's, on the URL) gets hits.
  */
 function snapStart(start: number, needed: Range, count: number) {
   const step = Math.max(1, Math.floor(count / 4));
@@ -242,7 +233,7 @@ export function isRowSelected({ all, ranges }: Selected, index: number) {
 
 /** Selects (`checked: true`) or deselects a span of rows. Never mutates `current`. */
 export function setRowsSelected(current: Selected, range: SelectedRange, checked: boolean): Selected {
-  // With `all`, the ranges are the exceptions, so selecting removes from them and deselecting adds to them.
+  // With `all`, ranges are the exceptions, so selecting removes from them and deselecting adds.
   return { all: current.all, ranges: selectRange(current.ranges, range, checked !== current.all) };
 }
 

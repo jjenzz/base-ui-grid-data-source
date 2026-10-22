@@ -7,10 +7,8 @@ const rows = products.map((item) => ({
   total: item.price * item.quantity,
   sales: Array.from({ length: weeks }, (_, week) => 5 + ((item.id * 31 + week * 17) % 95)),
 }));
-// This module stands in for a database. Everything lives in memory here, so each query filters and sorts every row;
-// a real backend would let its indexes do that, as the SQL comments below show.
-// createDataSource here just provides the equivalent of the consumer's search and sorting, so this PoC doesn't
-// need to reimplement them.
+// Stands in for a database: each query filters and sorts every row in memory, where a real backend would use indexes
+// (see the SQL comments). createDataSource provides the search and sorting, so this PoC doesn't reimplement them.
 const source = createDataSource(rows);
 
 type ColumnSort = Exclude<Parameters<typeof source.sort>[0], (...args: never[]) => unknown>;
@@ -59,8 +57,8 @@ export function parseProductsQuery(params: URLSearchParams): ProductsQuery | nul
   };
 }
 
-// Recently sorted results, so paging through one sort (and translating a selection from the query the user was just
-// on) doesn't sort every product again. The data never changes here; a store that changes would clear this on writes.
+// Recent results, so paging through one query, or translating a selection from the last one, doesn't sort again. The
+// data never changes here; a real store would clear this on writes.
 const recentResults = new Map<string, ProductRow[]>();
 const maxRecentResults = 10;
 
@@ -90,8 +88,7 @@ export function queryProducts({ search, searchColumns, sort }: Omit<ProductsQuer
 }
 
 /**
- * The rows in the query's range, plus where they start and how many rows match in total.
- * Pass `matching` when you already have the query's rows, to avoid sorting them again.
+ * The rows in the query's range, where they start, and the total matching. Pass `matching` if you have it already.
  * SQL: the query above with `LIMIT $end - $start OFFSET $start`, plus `SELECT count(*)` for the total.
  */
 export function getProductsPage(query: ProductsQuery, matching = queryProducts(query)) {
@@ -125,11 +122,11 @@ export function isSelection(value: unknown): value is Selected {
 }
 
 /**
- * Maps a selection from `previousQuery`'s results to the same products in `rows` (the new query's results).
- * With `all`, only the exceptions are positions, so only they need translating.
+ * Maps a selection from `previousQuery`'s results to the same products in `rows`, the new results. With `all`, only
+ * the exceptions are positions, so only they move.
  *
- * In SQL: find the ids at the old positions (`ORDER BY <old sort> LIMIT … OFFSET …` per range), then their new
- * positions (`row_number() OVER (ORDER BY <new sort>)`, keeping only those ids), so the indexes do the work.
+ * SQL: find the ids at the old positions (`ORDER BY <old sort> LIMIT … OFFSET …` per range), then their new positions
+ * (`row_number() OVER (ORDER BY <new sort>)`, keeping only those ids).
  */
 export function translateSelection(
   { all, ranges }: Selected,

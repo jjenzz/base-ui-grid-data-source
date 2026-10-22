@@ -35,7 +35,7 @@ export function ConsumerLazyGrid({
 
   function loadRange(range: Range, signal: AbortSignal) {
     const previousQuery = { ...data.view, searchColumns };
-    // Ignore selection changes while loading, so snapshot can't go stale mid-request.
+    // Ignore selection changes while loading, so the snapshot sent can't go stale mid-request.
     const selection = loading && { previousQuery, selected: data.selected };
     return getProducts({ ...view, ...selection, searchColumns, range }, signal);
   }
@@ -186,7 +186,7 @@ export function ConsumerLazyGrid({
   );
 }
 
-/** A grey bar standing in for a cell's value while its row loads. The row already says it's loading, so it's hidden. */
+/** A grey bar for a cell's value while its row loads. Hidden, since the row already announces it's loading. */
 function Skeleton() {
   return <span className="skeleton" aria-hidden="true" />;
 }

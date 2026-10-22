@@ -14,15 +14,15 @@ export interface ItemRegistry<Key, Item> {
 }
 
 /**
- * Collects item registrations into one immutable snapshot per React commit. Also returns the live registry, for reads
- * that must include the current commit's registrations before its snapshot is published.
+ * Collects item registrations into one immutable snapshot per commit, plus the live registry for reads that need the
+ * current commit's registrations before the snapshot is published.
  */
 export function useItemRegistry<Key, Item>(): ItemRegistry<Key, Item> {
   const registryRef = React.useRef(new Map<Key, Item>());
   const [version, setVersion] = React.useState(0);
 
-  // Items can register without their parent rendering, so each change asks the parent to render a new snapshot. Every
-  // change made during one commit is batched into the same render, so the snapshot always has all of them.
+  // Items register without their parent rendering, so each change re-renders it. React batches a commit's changes
+  // into one render, so the snapshot has all of them.
   const registerItem = useStableCallback((key: Key, item: Item) => {
     registryRef.current.set(key, item);
     setVersion((current) => current + 1);

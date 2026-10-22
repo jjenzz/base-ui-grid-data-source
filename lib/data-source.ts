@@ -1,8 +1,8 @@
 const DATA_SOURCE_ENTRY_SYMBOL = Symbol.for('@base-ui/react/data-source-entry');
-// Created once: `localeCompare` with options rebuilds its rules on every call, which made text sorts ~25× slower.
+// Created once: `localeCompare` with options rebuilds its rules on every call, making text sorts ~25× slower.
 const collator = new Intl.Collator(undefined, { numeric: true });
 
-/** The iterator resolves computed metadata before they cross the RSC boundary. */
+/** What the iterator yields: rows with metadata already computed, since functions can't cross the RSC boundary. */
 export interface DataSourceEntry<T, M extends Metadata = Metadata> {
   $$typeof: typeof DATA_SOURCE_ENTRY_SYMBOL;
   item: T;
@@ -33,7 +33,7 @@ export class DataSource<T, M extends Metadata = Metadata> implements Iterable<Da
   private entryByItem: Map<T, DataSourceEntry<T, M>>;
   private indexed = 0;
   private itemsCache?: T[];
-  // Where each row sits in the rows this source was created from, once filtered or sorted. Unset means unchanged.
+  // Each row's index in the rows this source was created from, once filtered or sorted. Unset means unchanged.
   private positions?: readonly number[];
 
   constructor(input: DataSourceInput<T, M>, options?: Options<T, M>) {
@@ -114,10 +114,7 @@ export class DataSource<T, M extends Metadata = Metadata> implements Iterable<Da
     return this.unwrap(entry);
   }
 
-  /**
-   * Where the row at `index` sits in the rows this source was created from, before any `filter` or `sort`. A source
-   * created from another source starts counting again from that one's rows.
-   */
+  /** The row's index in the rows this source was created from, before any `filter` or `sort`. */
   originalIndex(index: number): number | undefined {
     if (index < 0 || index >= this.length) return undefined;
     return this.positions ? this.positions[index] : index;

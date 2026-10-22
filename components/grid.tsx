@@ -29,20 +29,17 @@ import { useStableCallback } from '@/lib/use-stable-callback';
 const EMPTY_ROWS: never[] = [];
 const EMPTY_SELECTED: Selected = { all: false, ranges: [] };
 const DEFAULT_SORT = { column: 'id', direction: 'asc' } as const;
-// How long scrolling must pause before rows are requested, and the longest a request waits while scrolling continues.
+// Scroll pause before requesting rows, and the most a request waits while scrolling continues.
 const REQUEST_DELAY = 30;
 const MAX_REQUEST_DELAY = 100;
-// The width assumed for the viewport before it's measured, so the server renders enough columns to fill most screens.
+// Viewport width assumed before it's measured, so the server renders enough columns for most screens.
 const UNMEASURED_WIDTH = 1920;
 
 type RowData = { [key: string]: unknown };
-/** Metadata for rows with none, so it adds no columns. `Metadata` would add every string, so `id` would always exist. */
+/** No metadata columns. `Metadata` allows any key, so `RequireId` would always pass. */
 type NoMetadata = Record<never, never>;
 
-/**
- * Rows need an `id` to tell them apart, either as their own field or in the data source's metadata, like
- * `createDataSource(rows, { metadata: (row) => ({ id: row.sku }) })`.
- */
+/** Rows need an `id`, as a field or from metadata, like `metadata: (row) => ({ id: row.sku })`. */
 type RequireId<T, M> = 'id' extends keyof T | keyof M
   ? unknown
   : { rows: { 'Each row needs an `id`, as a field or from `metadata` in createDataSource': never } };
@@ -59,8 +56,7 @@ export type SelectedChangeDetails = {
  * GridRoot
  * -----------------------------------------------------------------------------------------------*/
 
-// Scroll-driven state has its own contexts, so moving the rendered window only re-renders the parts that render it,
-// not every row and cell reading the grid.
+// Scroll-driven state has its own contexts, so scrolling doesn't re-render every part that reads the grid.
 type GridContextValue<T extends RowData> = {
   rowCount: number;
   rowHeight: number;
@@ -69,7 +65,7 @@ type GridContextValue<T extends RowData> = {
   queryKey: string;
   canSort: boolean;
   loading: boolean;
-  /** `loading`, but only once it has lasted long enough to notice. Use for visuals so fast loads don't flicker. */
+  /** `loading` after a short delay. Use it for visuals, so fast loads don't flicker. */
   showLoading: boolean;
   selected: Selected;
   setSelected: (selection: Selected, reason: SelectedChangeDetails['reason']) => void;
@@ -78,51 +74,48 @@ type GridContextValue<T extends RowData> = {
   setSort: (sort: Sort<T>) => void;
   setScrollPosition: (top: number, left: number) => void;
   setSearch: (search: string) => void;
-  /** Every column, including the ones not rendered. Unknown until `Grid.VirtualHeaderCells` has measured its row. */
+  /** Every column, rendered or not. Unknown until `Grid.VirtualHeaderCells` measures its row. */
   columnCount: number | undefined;
-  /** The columns before the virtualised ones, so their `aria-colindex` counts them. */
+  /** Columns before the virtualised ones, which their `aria-colindex` counts. */
   columnsBefore: number | undefined;
-  /** Each other column's position among every column, by name, for its `aria-colindex`. */
+  /** Each non-virtualised column's `aria-colindex`, by name. */
   columnPositions: ReadonlyMap<string, number> | undefined;
   setViewportSize: (width: number, height: number) => void;
   reportColumnLayout: (layout: ColumnLayout) => void;
-  /**
-   * Rows before the virtualised ones (header rows, and any fixed body rows), so their `aria-rowindex` counts them.
-   * Unknown until `Grid.VirtualRows` counts them on the client, so the server's HTML has no row indexes.
-   */
+  /** Rows before the virtualised ones, which their `aria-rowindex` counts. Unknown until counted on the client. */
   rowsBefore: number | undefined;
-  /** Every row, including the ones not rendered. Unknown until counted, like `rowsBefore`. */
+  /** Every row, rendered or not. Unknown until counted. */
   totalRows: number | undefined;
-  /** Where each row outside the virtualised ones sits, by its registry key, once counted. */
+  /** Each non-virtualised row's position, by registry key. Unknown until counted. */
   rowPositions: ReadonlyMap<symbol, RowPosition> | undefined;
   reportRowLayout: (layout: RowLayout) => void;
 };
 
-/** The rows `Grid.VirtualRows` renders. Changes as the grid scrolls vertically. */
+/** The rows `Grid.VirtualRows` renders. Changes on vertical scroll. */
 type RowWindowContextValue<T extends RowData> = {
-  /** Each rendered row, its `id`, and where it sits in the `rows` given. Unloaded rows are `undefined`. */
+  /** Each rendered row with its `id` and index in the given `rows`, or `undefined` if not loaded. */
   visible: ({ item: T; id: string | number; itemIndex: number } | undefined)[];
   start: number;
   end: number;
 };
 
-/** The columns `Grid.VirtualHeaderCells` and `Grid.VirtualCells` render. Changes as the grid scrolls sideways. */
+/** The columns `Grid.VirtualHeaderCells` and `Grid.VirtualCells` render. Changes on horizontal scroll. */
 type ColumnWindowContextValue = {
   virtualColumnCount: number;
   start: number;
   end: number;
-  /** Where each virtualised column starts, using measured widths once known. */
+  /** Where each virtualised column starts, from measured widths once known. */
   offsets: Float64Array;
 };
 
-/** What `Grid.VirtualRows` counts after rendering: how many other rows come before and after the virtualised ones. */
+/** Counted by `Grid.VirtualRows` after render: the other rows before and after it, and where each one sits. */
 type RowLayout = { before: number; after: number; positions: ReadonlyMap<symbol, RowPosition> };
-/** Where a row outside the virtualised ones sits: before or after them, and its place there, counting from 1. */
+/** A non-virtualised row's side of the virtualised rows, and its place there from 1. */
 type RowPosition = { before: boolean; place: number };
 
 /**
- * What `Grid.VirtualHeaderCells` measures after rendering: where the virtualised columns begin, their real widths, and
- * the names of the other columns before and after them, in order.
+ * Measured by `Grid.VirtualHeaderCells` after render: where the virtualised columns start, their widths, and the other
+ * columns' names before and after them.
  */
 type ColumnLayout = { virtualStart: number; widths: ReadonlyMap<number, number> } & PermaColumns;
 type PermaColumns = { before: readonly string[]; after: readonly string[] };
@@ -130,8 +123,7 @@ type PermaColumns = { before: readonly string[]; after: readonly string[] };
 const Context = React.createContext<GridContextValue<RowData> | null>(null);
 const RowWindowContext = React.createContext<RowWindowContextValue<RowData> | null>(null);
 const ColumnWindowContext = React.createContext<ColumnWindowContextValue | null>(null);
-// The row `Grid.VirtualRows` is rendering: its position in the grid, and where it sits in `rows`, or `undefined` while
-// it hasn't loaded. Null outside virtualised rows.
+// The row `Grid.VirtualRows` is rendering: its grid position, and its index in `rows` (`undefined` until loaded).
 type BodyRowContextValue = { index: number; itemIndex: number | undefined };
 const BodyRowContext = React.createContext<BodyRowContextValue | null>(null);
 const RowIndexContext = React.createContext<number | undefined>(undefined);
@@ -169,33 +161,24 @@ export type RootProps<T extends RowData, M extends Metadata = NoMetadata> = {
   search?: string;
   defaultSearch?: string;
   searchColumns?: readonly Column<T, M>[];
-  /** The rows belong to a previous sort or search and are about to be replaced. Not needed while paging. */
+  /** The rows are from a previous sort or search and about to be replaced. Not needed while paging. */
   loading?: boolean;
   rowHeight?: number;
-  /**
-   * How many rows `Grid.VirtualRows` gives indexes for, including ones not loaded yet. Rows rendered as ordinary
-   * `Grid.Row` parts, like an inline row for adding one, aren't counted.
-   */
+  /** Rows `Grid.VirtualRows` covers, loaded or not. Ordinary `Grid.Row`s, like an add row, aren't counted. */
   virtualRowCount?: number;
   offset?: number;
   /** How many rows each request asks for and keeps in memory. */
   rangeSize?: number;
-  /** How many rows beyond those rendered to load ahead, in the scroll direction. Keep it well under `rangeSize`. */
+  /** Rows to load ahead of those rendered, in the scroll direction. Keep it well under `rangeSize`. */
   threshold?: number;
   /**
-   * Pixels of rows and columns rendered beyond each edge of the viewport. Until the viewport is measured (on the
-   * server, and the first client render), all of `rows` render, so pass the server only the rows it should render.
+   * Pixels rendered beyond each edge of the viewport. Until it's measured (on the server and first client render),
+   * every row in `rows` renders, so give the server only the rows it should render.
    */
   bufferPx?: number;
-  /**
-   * How many columns `Grid.VirtualHeaderCells` and `Grid.VirtualCells` give indexes for, and only render while in view. Columns
-   * rendered as ordinary `Grid.HeaderCell` and `Grid.Cell` parts, like pinned ones, aren't counted.
-   */
+  /** Columns the virtual header and body cells cover. Ordinary cells, like pinned ones, aren't counted. */
   virtualColumnCount?: number;
-  /**
-   * The width of virtualised columns without their own `Grid.Column` width. Columns not rendered yet are assumed to be
-   * this wide, and corrected once rendered and measured.
-   */
+  /** Width assumed for virtualised columns until they're measured, unless a `Grid.Column` sets one. */
   defaultColumnWidth?: number;
   selected?: Selected;
   defaultSelected?: Selected;
@@ -234,33 +217,30 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
   const rows = controlledRows ?? defaultRows;
   const source = React.useMemo(() => createDataSource(rows), [rows]);
   const [range, setRange] = React.useState<Range>(() => ({ start: offset, end: offset + rows.length }));
-  // Column widths start as `defaultColumnWidth` and are corrected as columns are measured.
+  // Measured widths of virtualised columns. Unmeasured ones use `defaultColumnWidth`.
   const [columnWidths, setColumnWidths] = React.useState<ReadonlyMap<number, number>>(() => new Map());
-  // The columns rendered around the virtualised ones, counted once their header row has rendered.
+  // Names of the columns around the virtualised ones, once their header row is measured.
   const [permaColumns, setPermaColumns] = React.useState<PermaColumns | null>(null);
-  // The rows rendered around the virtualised ones, once `Grid.VirtualRows` has counted them on the client. Until then
-  // rows aren't numbered: the server can't count them, and every row it renders is in its HTML anyway.
+  // Rows around the virtualised ones, counted on the client. The server can't count them, so its HTML has no row
+  // numbers, and doesn't need them: every row it renders is in the HTML.
   const [permaRows, setPermaRows] = React.useState<RowLayout | null>(null);
-  // When the wait is over, this changes, and the effect below checks what's needed with the latest rows and scroll.
+  // Bumped by `scheduleRequestRows`. State, so the row request effect runs after a render, with the latest window.
   const [scheduledRequest, setScheduledRequest] = React.useState(0);
-  // The last range requested, so a request that's still on its way isn't replaced while it covers what's needed.
+  // The request in flight, so one that still covers what's needed isn't replaced.
   const pendingRef = React.useRef<{ queryKey: string; range: Range } | null>(null);
   const gestureRef = React.useRef<SelectionGesture | null>(null);
-  // Dragging the scrollbar fires a scroll event every frame. Requesting on each one would cancel the previous
-  // request before it arrived, so nothing would load until the drag stopped. Instead, wait for scrolling to pause,
-  // but never longer than MAX_REQUEST_DELAY, so a continuous drag still loads rows as it goes.
+  // Throttle requests while scrolling. Requesting on every scroll event would cancel each request before it arrived,
+  // so a scrollbar drag would load nothing until it stopped.
   const requestTimerRef = React.useRef<ReturnType<typeof setTimeout>>(undefined);
   const requestDeadlineRef = React.useRef<number | null>(null);
-  // The scroll position and viewport size live in a ref, and state only changes when the rendered rows or columns do.
-  // Until the viewport is measured (on the server, and the first client render), the rows given render, and enough
-  // columns to fill a wide screen.
+  // Kept out of state, so scrolling only re-renders when the rendered rows or columns change.
   const viewportRef = React.useRef({
     scrollTop: 0,
     scrollLeft: 0,
     width: 0,
     height: 0,
     virtualStart: 0,
-    // The row at the top of the viewport, and which way it last moved.
+    // The top visible row, and which way it last moved, to load ahead in that direction.
     row: 0,
     direction: 'down' as ScrollDirection,
   });
@@ -293,7 +273,7 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
     onChange: onSortChange,
   });
 
-  // Columns after the virtualised ones come after all of them, rendered or not.
+  // Columns after the virtualised ones count all of them, rendered or not.
   const columnPositions = React.useMemo(() => {
     if (!permaColumns) return undefined;
     const { before, after } = permaColumns;
@@ -327,7 +307,7 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
     ? permaColumns.before.length + virtualColumnCount + permaColumns.after.length
     : undefined;
   const columnsBefore = permaColumns?.before.length;
-  // Every row's position, and which of them are rendered.
+  // The row count, and which rows are rendered.
   const rowState = getWindow({ loadedCount: sorted.length, totalRowCount: virtualRowCount, range });
   const rowCount = rowState.rowCount;
   const rowsBefore = permaRows?.before;
@@ -336,8 +316,8 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
   // Rows from a previous query (loading) don't count as loaded.
   const loaded = loading ? null : { start: offset, end: offset + sorted.length };
   const showLoading = useSpinDelay(loading);
-  // While loading, the row count belongs to the previous query, so it mustn't limit what's requested.
-  // Otherwise a query with no results would stop the next query from ever being requested.
+  // While loading, the row count is the previous query's. Capping requests with it would let a query with no results
+  // block the next one forever.
   const requestableRowCount = loading ? Infinity : rowState.rowCount;
 
   const isSelected = React.useMemo(() => {
@@ -358,10 +338,10 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
     [rowState.start, rowState.end, offset, sorted],
   );
 
-  // Asks for rows when the viewport needs rows that aren't loaded and no pending request covers them.
+  // Requests rows the viewport needs that aren't loaded or already requested.
   function requestRows() {
     const { height, row, direction } = viewportRef.current;
-    // Until the viewport is measured, the rendered rows are just the ones given, not the ones needed.
+    // Before measuring, the rendered rows are just those given, not the ones needed.
     if (height === 0) return;
     const needed = getNeededRange({
       rendered: { start: rowState.start, end: rowState.end },
@@ -378,8 +358,8 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
       direction,
     });
     if (!requested) return;
-    // Keep a pending request while it still has the row at the top of the screen. Replacing it would restart the
-    // wait (on a slow network, over and over while scrolling), and when its rows arrive this runs again for the rest.
+    // Keep a pending request that still has the top visible row. Replacing it restarts the wait, over and over on a
+    // slow network. The rest is requested when it arrives.
     const first = Math.min(row, Math.max(0, requestableRowCount - 1));
     const pending = pendingRef.current;
     if (pending?.queryKey === queryKey && containsRange(pending.range, { start: first, end: first + 1 })) return;
@@ -388,7 +368,7 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
   }
 
   function scheduleRequestRows() {
-    // Nobody to ask for rows, so don't re-render the grid when scrolling pauses.
+    // No one to request from, so don't re-render when scrolling pauses.
     if (!onRangeChange) return;
     const now = performance.now();
     requestDeadlineRef.current ??= now + MAX_REQUEST_DELAY;
@@ -407,9 +387,9 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
     if (height === 0) return;
     const around = (margin: number) =>
       getRowRange(rowHeight, rowState.rowCount, scrollTop - margin, scrollTop + height + margin);
-    // The most rows the visible area plus the full buffer can overlap, so the every-row window shrinks once measured.
+    // The most rows the viewport and buffer span. Caps the every-row window rendered before measuring.
     const maxRows = Math.ceil((height + bufferPx * 2) / rowHeight) + 1;
-    // Kept or moved from the latest window, not this render's, since scrolling can move it again before a re-render.
+    // From the latest window, since scrolling can move it again before a re-render.
     setRange((current) => getRenderedRange(current, around(bufferPx / 2), around(bufferPx), maxRows));
   }
 
@@ -421,12 +401,12 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
     setColumnWindow((current) => getRenderedRange(current, around(bufferPx / 2), around(bufferPx)));
   }
 
-  // Measuring only updates state, each from its latest value, so measures that arrive before the grid re-renders
-  // all count. The column window follows the new widths once they render, in the effect below.
+  // Only updates state, from its latest value, so measures before a re-render aren't lost. The column window follows
+  // the new widths in the layout effect below.
   const reportColumnLayout = useStableCallback(({ virtualStart, widths, before, after }: ColumnLayout) => {
     const startMoved = viewportRef.current.virtualStart !== virtualStart;
     viewportRef.current.virtualStart = virtualStart;
-    // Only stored when they change, so cells reading the positions don't all re-render on every measure.
+    // Kept when unchanged, so cells reading column positions don't re-render on every measure.
     const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((n, i) => n === b[i]);
     setPermaColumns((current) =>
       current && same(current.before, before) && same(current.after, after) ? current : { before, after },
@@ -441,17 +421,17 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
       }
       return next ?? current;
     });
-    // The virtualised columns now start somewhere else, though their widths may not have changed.
+    // The virtualised columns moved, even if their widths didn't.
     if (startMoved) updateColumnWindow(columnOffsets);
   });
 
-  // The column window follows the widths whenever they change, once they've rendered, and before paint.
+  // Moves the column window to new widths once they render, before paint.
   const moveColumnWindow = React.useEffectEvent(() => updateColumnWindow(columnOffsets));
   React.useLayoutEffect(() => {
     moveColumnWindow();
   }, [columnOffsets]);
 
-  // Counted once per change to the registered rows, from a complete snapshot of them.
+  // Counted once per change to the registered rows, from a complete snapshot.
   const reportRowLayout = useStableCallback((layout: RowLayout) => setPermaRows(layout));
 
   const setScrollPosition = useStableCallback((top: number, left: number) => {
@@ -480,7 +460,7 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
   });
 
   const selectRow = useStableCallback((nextSelected: boolean, index: number | null, shift: boolean) => {
-    // The rows belong to the previous query, so the consumer's selection is about to be replaced.
+    // The rows are the previous query's, whose selection is about to be replaced.
     if (index === null || loading) return;
     const selection = getSelectionGesture(selected, gestureRef.current, index, nextSelected, shift);
     const proposed = setRowsSelected(selection.base, selection.range, selection.adding);
@@ -494,11 +474,11 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
     setSelected(next, reason);
   });
 
-  // Check what's needed after scrolling pauses, and when rows arrive, the query changes or the grid mounts.
+  // Checks for missing rows when scrolling pauses, rows arrive, the query changes, and on mount.
   const requestRowsAfterUpdate = React.useEffectEvent(() => {
-    // The pending request's rows have arrived, so it no longer holds back the next request.
+    // Its rows arrived, so it no longer holds back the next request.
     const pending = pendingRef.current;
-    // It can come back short at the end of the rows, so only what exists has to arrive.
+    // It can come back short at the end, so only rows that exist must arrive.
     const arrived = pending && { start: pending.range.start, end: Math.min(pending.range.end, rowState.rowCount) };
     if (arrived && containsRange(loaded, arrived)) pendingRef.current = null;
     requestRows();
@@ -520,7 +500,7 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
     const previous = previousQueryRef.current;
     if (previous.queryKey === queryKey) return;
     previousQueryRef.current = { queryKey, sort };
-    // Tell consumers what changed, so they can treat sorting and searching differently.
+    // The reason lets consumers treat sorting and searching differently.
     const sortChanged = previous.sort.column !== sort.column || previous.sort.direction !== sort.direction;
     gestureRef.current = null;
     setSelected(EMPTY_SELECTED, sortChanged ? 'sort-change' : 'search-change');
@@ -609,14 +589,14 @@ export function Viewport({ onScroll, ...props }: React.ComponentProps<'div'>) {
   const ref = React.useRef<HTMLDivElement | null>(null);
   const { queryKey, setScrollPosition, setViewportSize } = grid;
 
-  // Before paint, so the new query's rows don't show for a frame at the old scroll position.
+  // Before paint, so the new query's rows don't flash at the old scroll position.
   React.useLayoutEffect(() => {
     if (!ref.current) return;
     ref.current.scrollTop = 0;
     setScrollPosition(0, ref.current.scrollLeft);
   }, [queryKey, setScrollPosition]);
 
-  // The viewport's size decides which rows and columns are visible. It's the only size the grid measures.
+  // The viewport's size decides which rows and columns are visible.
   React.useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
@@ -663,10 +643,7 @@ export function SearchInput({ onChange, ...props }: Omit<React.ComponentProps<'i
  * -----------------------------------------------------------------------------------------------*/
 
 const TableContext = React.createContext<{ id: string } | null>(null);
-/**
- * The grid's rows other than the virtualised ones, like header rows and an inline row for adding one, so
- * `Grid.VirtualRows` can count the rows around it without searching the DOM, and tell each one where it sits.
- */
+/** Non-virtualised rows, like header rows, so `Grid.VirtualRows` can number them without searching the DOM. */
 type RowRegistry = ItemRegistry<symbol, Registered<null>>;
 const RowRegistryContext = React.createContext<RowRegistry | null>(null);
 
@@ -700,9 +677,8 @@ export function Table({ children, style, ...props }: React.ComponentProps<'div'>
  * -----------------------------------------------------------------------------------------------*/
 
 /**
- * Declares the grid's columns: how wide they are, and which are pinned. Also offsets each pinned column by the widths
- * of the ones pinned before it on the same side, so they sit side by side, which needs the `Grid.Column`s to be its
- * direct children.
+ * Declares column widths and pinning. Offsets each pinned column by those pinned before it on its side, so the
+ * `Grid.Column`s must be direct children.
  */
 export function ColumnGroup({ children }: { children?: React.ReactNode }) {
   const id = React.useContext(TableContext)?.id;
@@ -710,7 +686,7 @@ export function ColumnGroup({ children }: { children?: React.ReactNode }) {
     React.isValidElement<ColumnProps>(child) && typeof child.props.name === 'string' ? [child.props] : [],
   );
   const offsets: string[] = [];
-  // Columns pinned to the end are offset from the right, so they're counted from the last one.
+  // End-pinned columns are offset from the right, so count from the last.
   for (const pinned of [
     columns.filter((c) => c.pinned === 'start'),
     columns.filter((c) => c.pinned === 'end').reverse(),
@@ -737,38 +713,35 @@ export function ColumnGroup({ children }: { children?: React.ReactNode }) {
 
 export type ColumnProps = {
   /**
-   * Matches the `name` of a `Grid.HeaderCell` and a `Grid.Cell`. Characters other than letters,
-   * numbers, `-` and `_` are treated as `_`, so names differing only in those (like `a b` and `a_b`) clash.
+   * Matches a `Grid.HeaderCell` and `Grid.Cell` `name`. Characters other than letters, numbers, `-` and `_` become `_`,
+   * so names like `a b` and `a_b` clash.
    */
   name: string;
 } & (
   | {
-      /** A fixed width. Columns without one share the remaining space equally. */
+      /** A fixed width. Columns without one share the remaining space. */
       width?: number | string;
       pinned?: undefined;
     }
   | {
       width: number | string;
-      /** Sticks to an edge while scrolling sideways. Pinned columns need a fixed `width`, to offset the ones after. */
+      /** Sticks to an edge when scrolling sideways. Needs `width` to offset the columns pinned after it. */
       pinned: 'start' | 'end';
     }
 );
 
-/**
- * The width (and optionally pinning) for one column. Columns without one share the remaining space.
- * Renders its own CSS rule: a width variable those cells read, and sticky positioning when pinned.
- */
+/** One column's width and pinning, as CSS rules its cells read, so widths apply before any JavaScript runs. */
 export function Column({ name, width, pinned }: ColumnProps) {
   const id = React.useContext(TableContext)?.id;
   if (!id) return null;
-  // Rules are wrapped in :where() so they have no specificity, and any of the consumer's own styles win.
+  // :where() has no specificity, so the consumer's own styles win.
   const grid = `[data-grid=${JSON.stringify(id)}]`;
   const rules: string[] = [];
 
   if (width !== undefined) rules.push(`:where(${grid}) { ${columnVariable(name)}: 0 0 ${cssLength(width)}; }`);
 
   if (pinned) {
-    // `Grid.ColumnGroup` sets the offset: the widths of the columns pinned before this one, on the same side.
+    // `Grid.ColumnGroup` sets the offset from the columns pinned before this one.
     const side = pinned === 'start' ? 'left' : 'right';
     rules.push(
       `:where(${grid} [data-column=${JSON.stringify(cssValue(name))}]) { position: sticky; ${side}: var(${pinVariable(name)}, 0); z-index: 1; }`,
@@ -811,7 +784,7 @@ export function HeaderRow({ children, style, ref: forwardedRef, ...props }: Head
   );
 }
 
-/** A header cell's name and, for a virtualised one, its column index. */
+/** A header cell's name, and its column index if virtualised. */
 type HeaderCellData = { name: string; index: number | undefined };
 /** The header cells rendered in a `Grid.HeaderRow`, so `Grid.VirtualHeaderCells` can measure them. */
 type HeaderCellRegistry = ItemRegistry<symbol, Registered<HeaderCellData>>;
@@ -821,8 +794,8 @@ type HeaderCellRegistry = ItemRegistry<symbol, Registered<HeaderCellData>>;
  * -----------------------------------------------------------------------------------------------*/
 
 /**
- * Header cells for virtualised columns: `{(index) => <Grid.HeaderCell … />}` is called for visible columns only.
- * Also measures them, so columns sized by a `Grid.Column` (or their content) correct `defaultColumnWidth`.
+ * Header cells for virtualised columns: `{(index) => <Grid.HeaderCell … />}` is called for visible ones only. Also
+ * measures them, replacing `defaultColumnWidth` with their real widths.
  */
 export function VirtualHeaderCells({ children }: VirtualColumnsProps) {
   const grid = useGridContext();
@@ -831,18 +804,16 @@ export function VirtualHeaderCells({ children }: VirtualColumnsProps) {
   const { reportColumnLayout } = grid;
   const { items, liveItems } = registry;
 
-  // Observes the header cells in the latest snapshot. When it changes, as cells come and go with the visible columns,
-  // a new observer starts on them all, and reports them all once.
+  // Observes every header cell in the latest snapshot, starting again as cells come and go with the visible columns.
   React.useLayoutEffect(() => {
     const spacer = spacerRef.current;
     if (!spacer) return;
 
-    // Measured when the observer reports, after the browser's own layout, so nothing here forces an extra one. It
-    // reports each cell when it starts being observed, and again whenever one's width changes, for example when a
-    // column's CSS loads or the consumer restyles it. The other header cells are observed too, so the virtualised
-    // ones' start, and which columns come before and after them, stay current as those change.
+    // Reports after the browser's own layout, so measuring forces no extra one: once per cell, then on width changes
+    // (CSS loading, restyling). Other header cells are observed too, so where the virtualised columns start, and the
+    // columns around them, stay current.
     const observer = new ResizeObserver((entries) => {
-      // The live cells, since the observer reports after the commit that rendered them.
+      // Live cells, which can be ahead of the snapshot when the observer reports.
       const cells = inPageOrder(liveItems);
       const indexByElement = new Map(cells.map(([, cell]) => [cell.element, cell.data.index]));
       const widths = new Map<number, number>();
@@ -850,7 +821,7 @@ export function VirtualHeaderCells({ children }: VirtualColumnsProps) {
         const index = indexByElement.get(entry.target);
         if (index !== undefined) widths.set(index, entry.borderBoxSize[0].inlineSize);
       }
-      // The other header cells, by name and in the row's order: the ones before the virtualised cells, then after.
+      // Non-virtualised columns' names, in order, split around the virtualised ones.
       const before: string[] = [];
       const after: string[] = [];
       for (const [, cell] of cells) {
@@ -883,7 +854,7 @@ export function HeaderCell({
   const virtual = React.useContext(VirtualColumnContext);
   const registry = useHeaderRowContext('Grid.HeaderCell');
   const index = virtual?.index;
-  // Adds the cell to its row's registry while it's mounted, so `Grid.VirtualHeaderCells` can measure it.
+  // Registered while mounted, so `Grid.VirtualHeaderCells` can measure it.
   const data = React.useMemo(() => ({ name, index }), [name, index]);
   const { ref } = useRegisteredElement(registry, data, forwardedRef);
   return (
@@ -931,10 +902,9 @@ export function SortButton({ onClick, disabled, ...props }: React.ComponentProps
 
 type VirtualRowsProps = {
   /**
-   * Called for each rendered row, with where that row sits in the `rows` given to `Grid.Root`, so `rows[index]` (or
-   * `source.at(index)`) is the row, however the grid has sorted or filtered them. The index is `undefined` for a row
-   * that hasn't loaded: its `Grid.Row` renders as a loading row, with placeholder cells or none. The index is
-   * only valid for the `rows` given in this render: look the row up straight away, and keep the row or its `id`.
+   * Called for each rendered row with its index in the `rows` given to `Grid.Root`, whatever the grid's sort or filter,
+   * or `undefined` if it hasn't loaded (its `Grid.Row` then renders as a loading row). The index is only valid for
+   * this render's `rows`, so keep the row or its `id`, not the index.
    */
   children: (index: number | undefined) => React.ReactNode;
 };
@@ -958,9 +928,8 @@ export function Body({
  * -----------------------------------------------------------------------------------------------*/
 
 /**
- * Rows for every position up to `virtualRowCount`: `{(index) => <Grid.Row … />}` is called for each rendered row, with
- * the row's index in `rows`, or `undefined` if it hasn't loaded, and the rest are spacers. Other rows can sit before or
- * after it, like an inline row for adding one.
+ * Rows up to `virtualRowCount`: `{(index) => <Grid.Row … />}` is called for each rendered row, and spacers stand in
+ * for the rest. Other rows can sit before or after it, like an add row.
  */
 export function VirtualRows({ children }: VirtualRowsProps) {
   const grid = useGridContext();
@@ -970,9 +939,7 @@ export function VirtualRows({ children }: VirtualRowsProps) {
   const registeredRows = React.useContext(RowRegistryContext)?.items;
   const { reportRowLayout } = grid;
 
-  // Count the grid's other rows, header rows included, so the virtualised rows' `aria-rowindex` follows them, and note
-  // where each one sits for its own. Runs once for each new snapshot of the registered rows, so it follows rows added
-  // or removed later too.
+  // Counts and numbers the rows around these ones, once per registry snapshot, so rows added later are included.
   React.useLayoutEffect(() => {
     const start = startRef.current;
     const end = endRef.current;
@@ -1011,9 +978,8 @@ export function VirtualRows({ children }: VirtualRowsProps) {
 }
 
 /**
- * `index` is the row's position in the grid, for selection and `aria-rowindex`; `itemIndex` is where it sits in `rows`,
- * and both `item` and `itemIndex` are `undefined` until it loads. `item` isn't rendered, but it's compared, so a row
- * whose index now holds a different item renders again.
+ * `index`: grid position, for selection and `aria-rowindex`. `itemIndex`: position in `rows`. Both `item` and
+ * `itemIndex` are `undefined` until loaded. `item` isn't rendered, but comparing it re-renders a row given a new item.
  */
 type BodyRowProps = {
   item: RowData | undefined;
@@ -1034,17 +1000,17 @@ const BodyRow = React.memo(function BodyRow({ index, itemIndex, render }: BodyRo
 
 type RowProps = Omit<React.ComponentProps<'div'>, 'children'> & { index?: number; children?: RowChildren };
 
-// Parts inside a row read the grid and pass what they need to a memoised part, which only renders when that changes.
+// Parts read the grid here and pass only what they need to a memoised part, so they render only when that changes.
 /** A function as children renders only virtualised cells, the same as `Grid.VirtualCells`. */
 export function Row({ index, ref: forwardedRef, ...props }: RowProps) {
   const grid = useGridContext();
   const bodyRow = React.useContext(BodyRowContext);
-  // Rows outside the virtualised ones are counted and numbered by `Grid.VirtualRows`.
+  // Non-virtualised rows register, so `Grid.VirtualRows` can number them.
   const { ref, ariaRowIndex: placeIndex } = useRowNumber(bodyRow === null, forwardedRef);
   const rowIndex = index ?? bodyRow?.index;
-  // A virtualised row that hasn't loaded. It still renders, so it can hold placeholder cells, or none.
+  // An unloaded virtualised row still renders, to hold placeholder cells or none.
   const loading = bodyRow !== null && bodyRow.itemIndex === undefined;
-  // A row with a position among the virtualised ones follows the rows before them, once they're counted.
+  // Virtualised rows come after the rows counted before them.
   const ariaRowIndex =
     rowIndex !== undefined && grid.rowsBefore !== undefined ? grid.rowsBefore + rowIndex + 1 : placeIndex;
   return (
@@ -1102,7 +1068,7 @@ export function VirtualCells({ children }: VirtualColumnsProps) {
  * GridCell
  * -----------------------------------------------------------------------------------------------*/
 
-/** `column` sets the cell's width and position; its content is whatever the consumer renders, like `row[column]`. */
+/** `name` sets the cell's width and position. Its content is up to the consumer. */
 type CellProps = React.ComponentProps<'div'> & { name: string };
 
 export function Cell(props: CellProps) {
@@ -1197,7 +1163,7 @@ export function Checkbox(props: CheckboxProps) {
   const grid = useGridContext();
   const index = React.useContext(RowIndexContext);
   const bodyRow = React.useContext(BodyRowContext);
-  // A row that hasn't loaded can't be selected: there's nothing to see yet.
+  // An unloaded row can't be selected: there's nothing to see yet.
   const rowLoading = bodyRow !== null && bodyRow.itemIndex === undefined;
   return (
     <MemoCheckbox
@@ -1252,7 +1218,7 @@ type SelectAllProps = Omit<React.ComponentProps<'input'>, 'type' | 'checked' | '
 export function SelectAll({ onChange, ...props }: SelectAllProps) {
   const grid = useGridContext();
   const count = countSelected(grid.selected, grid.rowCount);
-  // Checked for `all` with no exceptions, or when every row has been picked individually.
+  // Checked when every row is selected, through `all` or one by one.
   const checked = grid.rowCount > 0 && count >= grid.rowCount;
   const mixed = count > 0 && !checked;
   const ref = React.useRef<HTMLInputElement>(null);
@@ -1283,7 +1249,7 @@ export function SelectAll({ onChange, ...props }: SelectAllProps) {
  * -----------------------------------------------------------------------------------------------*/
 
 function Spacer({ height, ref }: { height: number; ref?: React.Ref<HTMLDivElement> }) {
-  // Always rendered, even when empty, since `Grid.VirtualRows` finds its rows' neighbours from its spacers.
+  // Always rendered, even at 0px: `Grid.VirtualRows` uses its spacers to find the rows around it.
   return <div aria-hidden="true" ref={ref} style={{ height }} />;
 }
 
@@ -1316,28 +1282,26 @@ export function State({
 
 /* ---------------------------------------------------------------------------------------------- */
 
-// Cells size themselves from CSS variables that each `Grid.Column` defines, so widths apply in the server's HTML before
-// any JavaScript runs, even when the grid's JSX comes from a Server Component. A column with a width gets a fixed
-// `flex` from its variable; columns without one fall back to sharing the remaining space equally.
-// Column names become part of CSS variable names, so anything else becomes `_` (so `a b` and `a_b` share one).
+// Cells size from CSS variables each `Grid.Column` defines, so widths apply in the server's HTML before any JavaScript
+// runs. Names become part of the variable names, so other characters become `_` (`a b` and `a_b` share one).
 const cssIdent = (name: string) => name.replace(/[^\w-]/g, '_');
-// Values go into a <style> element, so keep them from closing the rule or the element.
+// Values go into a <style> element, so strip anything that could close the rule or the element.
 const cssValue = (value: string) => value.replace(/[;{}<>]/g, '');
 const cssLength = (value: number | string) => cssValue(typeof value === 'number' ? `${value}px` : value);
 const columnVariable = (name: string) => `--grid-col-${cssIdent(name)}`;
-// How far a pinned column sticks from its edge: the width of the columns pinned before it.
+// A pinned column's offset from its edge: the widths of the columns pinned before it.
 const pinVariable = (name: string) => `--grid-pin-${cssIdent(name)}`;
 
-// Virtualised columns fall back to their known width (measured, or `defaultColumnWidth`), since the grid has to add
-// their widths up. Other columns fall back to sharing the remaining space.
+// Without a width variable, virtualised columns use their known width, since the grid adds them up. Others share the
+// remaining space.
 const columnStyle = (name: string, width?: number): React.CSSProperties => ({
   flex: `var(${columnVariable(name)}, ${width === undefined ? '1 1 0' : `0 0 ${width}px`})`,
   minWidth: 0,
 });
 
 /**
- * Adds a row outside the virtualised ones to the grid's rows, and gives its `aria-rowindex` once `Grid.VirtualRows` has
- * counted it on the client. Without virtualised rows nothing is counted, and every row is in the DOM, so none needs one.
+ * Registers a non-virtualised row, and gives its `aria-rowindex` once `Grid.VirtualRows` counts it on the client.
+ * Without virtualised rows nothing is counted, and none needs one: every row is in the DOM.
  */
 function useRowNumber(registered: boolean, forwardedRef: React.Ref<HTMLDivElement> | undefined) {
   const grid = useGridContext();
@@ -1350,13 +1314,12 @@ function useRowNumber(registered: boolean, forwardedRef: React.Ref<HTMLDivElemen
   return { ref, ariaRowIndex };
 }
 
-/** An element registered while it's mounted, with what its part tells the registry's owner about it. */
+/** A registered element, with the data its part gives the registry's owner. */
 type Registered<Data> = { element: Element; data: Data };
 
 /**
- * Registers the element its ref is given to while it's mounted, under a key of its own, and sets `forwardedRef` too.
- * Without a registry, the ref is just `forwardedRef`. Keep `data` stable (memoised), or the element is registered again
- * on every render.
+ * Registers the ref's element under its own key while mounted, and sets `forwardedRef` too. Without a registry, the
+ * ref is just `forwardedRef`. Keep `data` memoised, or the element re-registers on every render.
  */
 function useRegisteredElement<Data>(
   registry: ItemRegistry<symbol, Registered<Data>> | null,
@@ -1402,9 +1365,8 @@ function attachRef<T>(ref: React.Ref<T> | undefined, element: T): () => void {
 }
 
 /**
- * A cell's position among every column. Virtualised columns leave the rest out of the DOM, so assistive tech can't count
- * positions from it: the virtualised cells give theirs, and so do the others, since those after them would be miscounted.
- * Unknown until `Grid.VirtualHeaderCells` has measured its row.
+ * A cell's `aria-colindex`. Virtualisation leaves columns out of the DOM, so assistive tech can't count positions:
+ * every cell gives its own, or those after the virtualised ones would be miscounted. Unknown until measured.
  */
 function getColumnIndex(
   grid: Pick<GridContextValue<RowData>, 'columnsBefore' | 'columnPositions'>,
