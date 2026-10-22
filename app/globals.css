@@ -1,26 +1,199 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+body {
+  background: #f4f3ef;
+  color: #202923;
+  font-family: Arial, sans-serif;
 }
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+main {
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 56px 28px;
 }
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+header {
+  max-width: 760px;
+  margin-bottom: 32px;
+}
+h1 {
+  font-size: clamp(30px, 4vw, 48px);
+  line-height: 1.15;
+  letter-spacing: -0.045em;
+  margin: 16px 0;
+}
+header > p:last-child {
+  line-height: 1.65;
+  color: #5b655e;
+}
+nav,
+.toolbar,
+footer {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+nav {
+  margin-bottom: 20px;
+}
+button,
+nav a {
+  cursor: pointer;
+  border: 1px solid #d3d9d2;
+  border-radius: 6px;
+  padding: 9px 13px;
+  background: white;
+  font-size: 13px;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button:focus-visible,
+nav a:focus-visible,
+input:focus-visible {
+  outline: 2px solid #337b57;
+  outline-offset: 3px;
+}
+.panel {
+  background: white;
+  border: 1px solid #d6dcd5;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.toolbar {
+  padding: 20px;
+  justify-content: space-between;
+}
+label {
+  font-size: 12px;
+  color: #526055;
+  display: grid;
+  gap: 6px;
+}
+input:not([type='checkbox']) {
+  border: 1px solid #cdd5ce;
+  border-radius: 5px;
+  padding: 8px;
+  color: #202923;
+  background: white;
+}
+.status {
+  min-height: 48px;
+  padding: 10px 20px;
+  background: #eef4ee;
+  color: #37553e;
+  font-size: 13px;
+  display: flex;
+  gap: 15px;
+  align-items: center;
+}
+.grid-scroll {
+  height: 440px;
+  overflow: auto;
+}
+[role='grid'] {
+  font-size: 13px;
+}
+[role='columnheader'],
+[role='gridcell'] {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  /* pinned cells cover what scrolls underneath them */
+  background: white;
+}
+[role='columnheader'] {
+  background: #fafbf8;
+  border-bottom: 1px solid #d6dcd5;
+  font-weight: bold;
+}
+[role='columnheader'] button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-weight: bold;
+  white-space: nowrap;
+}
+[role='gridcell'] {
+  border-bottom: 1px solid #eef0ea;
+}
+[role='row'][data-placeholder] {
+  border-bottom: 1px solid #eef0ea;
+}
+/* An inline row for adding a product. It isn't virtualised, so it can stay pinned under the header */
+.add-row {
+  position: sticky;
+  top: 44px;
+  z-index: 2;
+}
+.add-row [role='gridcell'] {
+  background: #fafbf8;
+  border-bottom-color: #d6dcd5;
+  padding: 0 6px;
+  color: #637066;
+}
+.add-row input,
+.add-row select {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 6px;
+  font-size: 13px;
+}
+.add-row button {
+  padding: 2px 8px;
+  font-weight: bold;
+}
+[role='row'][data-selected] [role='gridcell'] {
+  background: #e9f3eb;
+}
+.grid-caption {
+  padding: 12px 20px;
+  border-top: 1px solid #d6dcd5;
+  font-size: 12px;
+  color: #637066;
+  margin: 0;
+}
+footer {
+  padding: 16px 20px;
+  border-top: 1px solid #e1e5dd;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.empty {
+  padding: 50px;
+  text-align: center;
+}
+@media (max-width: 700px) {
+  main {
+    padding: 28px 14px;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+[role='columnheader'] button::after {
+  content: ' ↕';
+}
+[role='columnheader'] button[data-direction='asc']::after {
+  content: ' ↑';
+}
+[role='columnheader'] button[data-direction='desc']::after {
+  content: ' ↓';
+}
+
+nav a {
+  display: inline-flex;
+  text-decoration: none;
+  font-weight: 600;
+}
+nav a:hover {
+  background: #eef4ee;
+  border-color: #9eafa1;
+}
+nav a[aria-current='page'] {
+  background: #37553e;
+  border-color: #37553e;
+  color: white;
 }
