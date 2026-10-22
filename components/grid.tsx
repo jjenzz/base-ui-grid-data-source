@@ -167,10 +167,8 @@ export type RootProps<T extends RowData, M extends Metadata = NoMetadata> = {
   /** Rows `Grid.VirtualRows` covers, loaded or not. Ordinary `Grid.Row`s, like an add row, aren't counted. */
   virtualRowCount?: number;
   offset?: number;
-  /** How many rows each request asks for and keeps in memory. */
+  /** How many rows each request asks for and keeps in memory. A quarter of it is loaded ahead of the rendered rows. */
   rangeSize?: number;
-  /** Rows to load ahead of those rendered, in the scroll direction. Keep it well under `rangeSize`. */
-  threshold?: number;
   /**
    * Pixels rendered beyond each edge of the viewport. Until it's measured (on the server and first client render),
    * every row in `rows` renders, so give the server only the rows it should render.
@@ -202,7 +200,6 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
   virtualRowCount,
   offset = 0,
   rangeSize = 25,
-  threshold = 20,
   bufferPx = 400,
   virtualColumnCount = 0,
   defaultColumnWidth = 150,
@@ -343,6 +340,8 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
     const { height, row, direction } = viewportRef.current;
     // Before measuring, the rendered rows are just those given, not the ones needed.
     if (height === 0) return;
+
+    const threshold = Math.floor(rangeSize / 4);
     const needed = getNeededRange({
       rendered: { start: rowState.start, end: rowState.end },
       rowCount: requestableRowCount,

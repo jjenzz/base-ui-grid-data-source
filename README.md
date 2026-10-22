@@ -119,7 +119,7 @@ own. You build the table from the other parts:
 
 Pass the rows you have, where they start (`offset`), and the full count (`virtualRowCount`). The grid reserves the
 whole scroll height, renders loading rows for rows that haven't loaded, and calls `onRangeChange({ start, end })` when
-it needs more. `rangeSize` and `threshold` control how much it asks for and how early. Set `loading` while a new sort
+it needs more. `rangeSize` sets how many rows it asks for, and a quarter of that is loaded ahead. Set `loading` while a new sort
 or search is on its way, so the old rows aren't treated as current. `/lazy` handles cancelling, caching and retries.
 
 ### Selection

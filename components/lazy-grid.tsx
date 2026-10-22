@@ -66,7 +66,6 @@ export function ConsumerLazyGrid({
         loading={loading && !error}
         search={view.search}
         sort={view.sort}
-        threshold={50}
         virtualRowCount={data.total}
         virtualColumnCount={weeks}
         defaultColumnWidth={90}
