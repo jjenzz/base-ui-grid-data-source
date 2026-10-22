@@ -126,7 +126,7 @@ export function ConsumerLazyGrid({
 
               <Grid.VirtualRows>
                 {(index) => {
-                  const row = index !== undefined ? data.items[index] : null;
+                  const row = index !== undefined ? data.items[index] : undefined;
                   return (
                     <Grid.Row>
                       <Grid.Cell name="select">

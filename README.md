@@ -77,11 +77,11 @@ own. You build the table from the other parts:
       </Grid.Header>
       <Grid.Body>
         {(index) => {
-          const row = index !== undefined ? data[index] : null;
+          const row = index !== undefined ? data[index] : undefined;
           return (
             <Grid.Row>
               <Grid.Cell name="select">
-                <Grid.Checkbox disabled={!row} aria-label={row ? `Select ${row.name}` : ''} />
+                <Grid.Checkbox disabled={!row} aria-label={row && `Select ${row.name}`} />
               </Grid.Cell>
               <Grid.Cell name="id">{row?.id ?? <Skeleton />}</Grid.Cell>
               <Grid.Cell name="name">{row?.name ?? <Skeleton />}</Grid.Cell>
