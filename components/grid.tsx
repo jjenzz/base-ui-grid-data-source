@@ -240,7 +240,7 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
   const [permaColumns, setPermaColumns] = React.useState<PermaColumns | null>(null);
   // The rows rendered around the virtualised ones, once `Grid.VirtualRows` has counted them on the client. Until then
   // rows aren't numbered: the server can't count them, and every row it renders is in its HTML anyway.
-  const [otherRows, setOtherRows] = React.useState<RowLayout | null>(null);
+  const [permaRows, setPermaRows] = React.useState<RowLayout | null>(null);
   // When the wait is over, this changes, and the effect below checks what's needed with the latest rows and scroll.
   const [scheduledRequest, setScheduledRequest] = React.useState(0);
   // The last range requested, so a request that's still on its way isn't replaced while it covers what's needed.
@@ -330,9 +330,9 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
   // Every row's position, and which of them are rendered.
   const rowState = getWindow({ loadedCount: sorted.length, totalRowCount: virtualRowCount, range });
   const rowCount = rowState.rowCount;
-  const rowsBefore = otherRows?.before;
-  const totalRows = otherRows ? otherRows.before + rowCount + otherRows.after : undefined;
-  const rowPositions = otherRows?.positions;
+  const rowsBefore = permaRows?.before;
+  const totalRows = permaRows ? permaRows.before + rowCount + permaRows.after : undefined;
+  const rowPositions = permaRows?.positions;
   // Rows from a previous query (loading) don't count as loaded.
   const loaded = loading ? null : { start: offset, end: offset + sorted.length };
   const showLoading = useSpinDelay(loading);
@@ -452,7 +452,7 @@ export function Root<T extends RowData, M extends Metadata = NoMetadata>({
   }, [columnOffsets]);
 
   // Counted once per change to the registered rows, from a complete snapshot of them.
-  const reportRowLayout = useStableCallback((layout: RowLayout) => setOtherRows(layout));
+  const reportRowLayout = useStableCallback((layout: RowLayout) => setPermaRows(layout));
 
   const setScrollPosition = useStableCallback((top: number, left: number) => {
     const viewport = viewportRef.current;
